@@ -1,6 +1,9 @@
-name: khudafinder_core
+name: khudafinder
 channels:
   - conda-forge
 dependencies:
   - python=3.12
   - pytorch
+  - gymnasium
+  - pygame
+  - pymunk
