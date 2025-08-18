@@ -10,7 +10,6 @@ class StableObstacle(Entity):
 
     def __init__(
         self,
-        space: pymunk.Space,
         position: Vector2D,
         radius: float = 0.3,
         mass: float = 1.0,
@@ -18,7 +17,6 @@ class StableObstacle(Entity):
         direction: Vector2D = None,
     ):
         super().__init__(
-            space,
             position,
             radius,
             mass,

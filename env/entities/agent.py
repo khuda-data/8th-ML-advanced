@@ -9,7 +9,6 @@ class Agent(Entity):
 
     def __init__(
         self,
-        space: pymunk.Space,
         position: Vector2D,
         radius: float = 0.5,
         mass: float = 1.0,
@@ -17,7 +16,6 @@ class Agent(Entity):
         max_acceleration: float = 10.0,
     ):
         super().__init__(
-            space,
             position,
             radius,
             mass,

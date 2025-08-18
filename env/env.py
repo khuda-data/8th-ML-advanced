@@ -9,7 +9,7 @@ from typing import List, Optional, Tuple, Dict, Any
 from .types import CollisionType, Vector2D
 from .entities.agent import Agent
 from .entities.entity import Entity
-from .entities.stable_obstacle import StableObstacle
+from .encoder import BaseEncoder, PaddingEncoder
 
 
 class KFEnv(gym.Env):
@@ -19,22 +19,25 @@ class KFEnv(gym.Env):
         self,
         render_mode: Optional[str] = None,
         world_size: float = 20.0,
-        obstacles: List[Entity] = None,
+        encoder: BaseEncoder = None,
     ) -> None:
         super().__init__()
 
         self.render_mode = render_mode
         self.world_size = world_size
-        self.obstacles_config = obstacles or []
+
+        # Initialize encoder
+        if encoder is None:
+            self.encoder = PaddingEncoder(max_obstacles=10)  # Default value
+        else:
+            self.encoder = encoder
 
         self.action_space = spaces.Box(
             low=-1.0, high=1.0, shape=(2,), dtype=np.float32
         )
 
-        # TODO: Get observation space size from encoder
-        # For now, using dummy observation space
-        # obs_dim = encoder.get_observation_space_size(agent, obstacles, target)
-        obs_dim = 32  # Dummy size, will be replaced by encoder
+        # Get observation space size from encoder
+        obs_dim = self.encoder.get_observation_space_size()
 
         self.observation_space = spaces.Box(
             low=-np.inf, high=np.inf, shape=(obs_dim,), dtype=np.float32
@@ -83,44 +86,58 @@ class KFEnv(gym.Env):
             shape.collision_type = CollisionType.WALL
             self.space.add(body, shape)
 
+    def add_agent(self, agent: Agent) -> None:
+        """
+        Add an agent to the environment
+
+        Args:
+            agent: Agent instance to add
+        """
+        # Remove existing agent if present
+        if self.agent is not None:
+            self.agent.remove_from_space()
+
+        self.agent = agent
+        # Connect agent to this environment's space
+        self.agent.set_space(self.space)
+
+    def add_obstacle(self, obstacle: Entity) -> None:
+        """
+        Add an obstacle to the environment
+
+        Args:
+            obstacle: Entity instance to add as obstacle
+        """
+        self.obstacles.append(obstacle)
+        # Connect obstacle to this environment's space
+        obstacle.set_space(self.space)
+
+    def clear_all_entities(self) -> None:
+        """Clear all entities from the environment (public method)"""
+        if self.agent:
+            self.agent.remove_from_space()
+            self.agent = None
+
+        for obstacle in self.obstacles:
+            obstacle.remove_from_space()
+        self.obstacles = []
+
     def reset(
         self, seed: Optional[int] = None
     ) -> Tuple[np.ndarray, Dict[str, Any]]:
         super().reset(seed=seed)
 
-        # Clear existing entities
-        if self.agent:
-            self.agent.remove_from_space()
+        # Reset existing entities to their initial positions
+        if self.agent is not None:
+            self.agent.reset()
+
         for obstacle in self.obstacles:
-            obstacle.remove_from_space()
+            obstacle.reset()
 
-        # Create agent
-        agent_pos = self._get_random_position()
-        self.agent = Agent(self.space, agent_pos)
-
-        # Create obstacles from config or default
-        self.obstacles = []
-        if self.obstacles_config:
-            for i, obstacle_class in enumerate(self.obstacles_config):
-                obs_pos = self._get_random_position()
-                if isinstance(obstacle_class, type) and issubclass(
-                    obstacle_class, Entity
-                ):
-                    obstacle = obstacle_class(self.space, obs_pos)
-                    self.obstacles.append(obstacle)
-        else:
-            # Default: create 5 stable obstacles
-            for _ in range(5):
-                obs_pos = self._get_random_position()
-                obstacle = StableObstacle(self.space, obs_pos)
-                self.obstacles.append(obstacle)
-
-        # Set target position
+        # Set new target position
         self.target_position = self._get_random_position()
 
-        observation = (
-            self._get_obs_vector()
-        )  # TODO: Replace with encoder output
+        observation = self._get_obs_vector()
         info = self._get_info()
         return observation, info
 
@@ -142,9 +159,7 @@ class KFEnv(gym.Env):
             obstacle.update(dt)
 
         # Calculate reward and check termination
-        observation = (
-            self._get_obs_vector()
-        )  # TODO: Replace with encoder output
+        observation = self._get_obs_vector()
         reward = self._calculate_reward()
         terminated = self._check_collision()
         truncated = False
@@ -204,11 +219,9 @@ class KFEnv(gym.Env):
         return obs
 
     def _get_obs_vector(self) -> np.ndarray:
-        """TODO: This will be replaced by encoder
-        For now, return dummy observation vector
-        """
-        # This is a placeholder until encoder is implemented
-        return np.zeros(self.observation_space.shape[0], dtype=np.float32)
+        """Return observation as encoded vector using the encoder"""
+        obs_dict = self._get_obs()
+        return self.encoder.encode(obs_dict)
 
     def _calculate_reward(self) -> float:
         if not self.agent:

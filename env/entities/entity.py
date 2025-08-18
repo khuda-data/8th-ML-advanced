@@ -1,6 +1,6 @@
 import pymunk
 import pygame
-from typing import Tuple
+from typing import Tuple, Optional
 from ..types import CollisionType, Vector2D
 
 
@@ -9,27 +9,42 @@ class Entity:
 
     def __init__(
         self,
-        space: pymunk.Space,
         position: Vector2D,
         radius: float = 1.0,
         mass: float = 1.0,
         color: Tuple[int, int, int] = (100, 100, 100),
         collision_type: CollisionType = CollisionType.ENTITY,
     ):
-        self.space = space
+        self.space: Optional[pymunk.Space] = None
         self.radius = radius
         self.color = color
+        self.mass = mass
+        self.collision_type = collision_type
+        self.initial_position = position
 
+        # Create physics body and shape but don't add to space yet
         moment = pymunk.moment_for_circle(mass, 0, radius)
         self.body = pymunk.Body(mass, moment)
-
         self.shape = pymunk.Circle(self.body, radius)
         self.shape.friction = 0.7
         self.shape.collision_type = collision_type
 
-        self.space.add(self.body, self.shape)
-
         self.reset(position)
+
+    def set_space(self, space: pymunk.Space) -> None:
+        """
+        Set the physics space for this entity
+
+        Args:
+            space: Pymunk space to add this entity to
+        """
+        # Remove from old space if exists
+        if self.space is not None:
+            self.remove_from_space()
+
+        self.space = space
+        if self.space is not None:
+            self.space.add(self.body, self.shape)
 
     def get_position(self) -> Vector2D:
         return Vector2D(self.body.position.x, self.body.position.y)
@@ -66,10 +81,23 @@ class Entity:
         pass
 
     def remove_from_space(self):
-        if self.body in self.space.bodies:
+        """Remove this entity from its physics space"""
+        if self.space is not None and self.body in self.space.bodies:
             self.space.remove(self.body, self.shape)
+            self.space = None
 
-    def reset(self, position: Vector2D):
+    def reset(self, position: Vector2D = None):
+        """
+        Reset entity to initial or specified position
+
+        Args:
+            position: Position to reset to, or None to use initial position
+        """
+        if position is None:
+            position = self.initial_position
+        else:
+            self.initial_position = position
+
         self.set_position(position)
         self.set_velocity(Vector2D(0, 0))
         self.body.angular_velocity = 0
