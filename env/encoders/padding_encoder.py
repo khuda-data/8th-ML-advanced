@@ -1,7 +1,9 @@
 import numpy as np
-from typing import Dict, Any, List
+from typing import List, Dict, Any
 from .base_encoder import BaseEncoder
+from ..types import Observation, Vector2D
 from ..entities.entity import Entity
+from ..entities.agent import Agent
 
 
 class PaddingEncoder(BaseEncoder):
@@ -17,7 +19,8 @@ class PaddingEncoder(BaseEncoder):
         Args:
             max_obstacles: Maximum number of obstacles to encode (with padding)
         """
-        super().__init__(max_obstacles)
+        super().__init__()
+        self.max_obstacles = max_obstacles
 
         # Observation space structure:
         # - Agent: [pos_x, pos_y, vel_x, vel_y] = 4 elements
@@ -41,12 +44,12 @@ class PaddingEncoder(BaseEncoder):
         """
         return self._observation_size
 
-    def encode(self, observation: Dict[str, Any]) -> np.ndarray:
+    def encode(self, observation: Observation) -> np.ndarray:
         """
-        Encode observation dictionary into a flat vector with padding
+        Encode observation into a flat vector with padding
 
         Args:
-            observation: Dictionary containing:
+            observation: Typed observation containing:
                 - agent: Agent object
                 - obstacles: List of Entity objects
                 - target: Vector2D target position
@@ -54,10 +57,10 @@ class PaddingEncoder(BaseEncoder):
         Returns:
             Encoded observation as numpy array with fixed size
         """
-        # Extract components
-        agent = observation.get("agent")
-        obstacles = observation.get("obstacles", [])
-        target = observation.get("target")
+        # Extract components from typed observation
+        agent = observation.agent
+        obstacles = observation.obstacles
+        target = observation.target
 
         # Encode agent
         agent_encoding = self._encode_agent(agent)
@@ -74,6 +77,26 @@ class PaddingEncoder(BaseEncoder):
         )
 
         return full_encoding
+
+    def _encode_agent(self, agent: Agent) -> np.ndarray:
+        """
+        Encode agent state
+
+        Args:
+            agent: Agent object
+
+        Returns:
+            Agent encoding as numpy array [pos_x, pos_y, vel_x, vel_y]
+        """
+        if agent is None:
+            return np.zeros(4, dtype=np.float32)
+
+        position = agent.get_position()
+        velocity = agent.get_velocity()
+
+        return np.array(
+            [position.x, position.y, velocity.x, velocity.y], dtype=np.float32
+        )
 
     def _encode_obstacles_with_padding(
         self, obstacles: List[Entity]
@@ -126,3 +149,34 @@ class PaddingEncoder(BaseEncoder):
                 "obstacles": f"[{self._agent_size + self._target_size}:{self._observation_size}] - (pos_x, pos_y, radius) * {self.max_obstacles}",
             },
         }
+
+    def _encode_target(self, target: Vector2D) -> np.ndarray:
+        """
+        Encode target position
+
+        Args:
+            target: Target position
+
+        Returns:
+            Target encoding as numpy array [pos_x, pos_y]
+        """
+        return np.array([target.x, target.y], dtype=np.float32)
+
+    def _encode_obstacle(self, obstacle: Entity) -> np.ndarray:
+        """
+        Encode single obstacle state
+
+        Args:
+            obstacle: Obstacle entity
+
+        Returns:
+            Obstacle encoding as numpy array [pos_x, pos_y, radius]
+        """
+        if obstacle is None:
+            return np.zeros(3, dtype=np.float32)
+
+        position = obstacle.get_position()
+
+        return np.array(
+            [position.x, position.y, obstacle.radius], dtype=np.float32
+        )

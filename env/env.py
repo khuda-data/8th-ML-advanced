@@ -6,7 +6,7 @@ import numpy as np
 import random
 from typing import List, Optional, Tuple, Dict, Any
 
-from .types import CollisionType, Vector2D
+from .types import CollisionType, Vector2D, Observation
 from .entities import Agent, Entity
 from .encoders import BaseEncoder, PaddingEncoder
 
@@ -208,14 +208,13 @@ class KFEnv(gym.Env):
         y = random.uniform(-half_size, half_size)
         return Vector2D(x, y)
 
-    def _get_obs(self) -> Dict[str, Any]:
-        """Return observation as dictionary with entity objects"""
-        obs = {
-            "agent": self.agent,
-            "obstacles": self.obstacles,
-            "target": self.target_position,
-        }
-        return obs
+    def _get_obs(self) -> Observation:
+        """Return observation as typed Observation object"""
+        return Observation(
+            agent=self.agent,
+            obstacles=self.obstacles,
+            target=self.target_position,
+        )
 
     def _get_obs_vector(self) -> np.ndarray:
         """Return observation as encoded vector using the encoder"""
