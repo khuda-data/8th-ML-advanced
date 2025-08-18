@@ -7,9 +7,8 @@ import random
 from typing import List, Optional, Tuple, Dict, Any
 
 from .types import CollisionType, Vector2D
-from .entities.agent import Agent
-from .entities.entity import Entity
-from .encoder import BaseEncoder, PaddingEncoder
+from .entities import Agent, Entity
+from .encoders import BaseEncoder, PaddingEncoder
 
 
 class KFEnv(gym.Env):

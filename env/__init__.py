@@ -1,4 +1,14 @@
-from .types import Vector2D, CollisionType
+from .types import *
 from .env import KFEnv
 from .entities import *
-from .encoder import BaseEncoder, PaddingEncoder
+from .encoders import *
+
+__all__ = [
+    "Vector2D",
+    "CollisionType",
+    "KFEnv",
+    "BaseEncoder",
+    "PaddingEncoder",
+    "Entity",
+    "Agent",
+]
