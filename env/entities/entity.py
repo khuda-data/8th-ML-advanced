@@ -22,7 +22,6 @@ class Entity:
 
         moment = pymunk.moment_for_circle(mass, 0, radius)
         self.body = pymunk.Body(mass, moment)
-        self.body.position = position.x, position.y
 
         self.shape = pymunk.Circle(self.body, radius)
         self.shape.friction = 0.7
@@ -30,7 +29,6 @@ class Entity:
 
         self.space.add(self.body, self.shape)
 
-        # Initialize entity state
         self.reset(position)
 
     def get_position(self) -> Vector2D:
@@ -67,12 +65,11 @@ class Entity:
         """Override for entity-specific updates"""
         pass
 
-    def reset(self, position: Vector2D):
-        """Reset entity to initial state"""
-        self.set_position(position)
-        self.set_velocity(Vector2D(0, 0))
-        self.body.angular_velocity = 0
-
     def remove_from_space(self):
         if self.body in self.space.bodies:
             self.space.remove(self.body, self.shape)
+
+    def reset(self, position: Vector2D):
+        self.set_position(position)
+        self.set_velocity(Vector2D(0, 0))
+        self.body.angular_velocity = 0

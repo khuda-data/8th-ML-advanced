@@ -7,8 +7,9 @@ import random
 from typing import List, Optional, Tuple, Dict, Any
 
 from .types import CollisionType, Vector2D
-from .entities import Agent
-from .entities import Obstacle
+from .entities.agent import Agent
+from .entities.entity import Entity
+from .entities.stable_obstacle import StableObstacle
 
 
 class KFEnv(gym.Env):
@@ -18,20 +19,23 @@ class KFEnv(gym.Env):
         self,
         render_mode: Optional[str] = None,
         world_size: float = 20.0,
-        num_obstacles: int = 5,
+        obstacles: List[Entity] = None,
     ) -> None:
         super().__init__()
 
         self.render_mode = render_mode
         self.world_size = world_size
-        self.num_obstacles = num_obstacles
+        self.obstacles_config = obstacles or []
 
         self.action_space = spaces.Box(
             low=-1.0, high=1.0, shape=(2,), dtype=np.float32
         )
 
-        # Agent state (pos_x, pos_y, vel_x, vel_y) + obstacles positions
-        obs_dim = 4 + self.num_obstacles * 2
+        # TODO: Get observation space size from encoder
+        # For now, using dummy observation space
+        # obs_dim = encoder.get_observation_space_size(agent, obstacles, target)
+        obs_dim = 32  # Dummy size, will be replaced by encoder
+
         self.observation_space = spaces.Box(
             low=-np.inf, high=np.inf, shape=(obs_dim,), dtype=np.float32
         )
@@ -47,7 +51,7 @@ class KFEnv(gym.Env):
         self.space.gravity = (0, 0)  # No gravity for top-down view
 
         self.agent: Optional[Agent] = None
-        self.obstacles: List[Obstacle] = []
+        self.obstacles: List[Entity] = []
         self.target_position: Vector2D = Vector2D(0, 0)
 
         self._setup_boundaries()
@@ -80,33 +84,43 @@ class KFEnv(gym.Env):
             self.space.add(body, shape)
 
     def reset(
-        self,
-        seed: Optional[int] = None,
-        options: Optional[Dict[str, Any]] = None,
+        self, seed: Optional[int] = None
     ) -> Tuple[np.ndarray, Dict[str, Any]]:
         super().reset(seed=seed)
 
         # Clear existing entities
-        if hasattr(self, "agent") and self.agent:
+        if self.agent:
             self.agent.remove_from_space()
-        if hasattr(self, "obstacles"):
-            for obstacle in self.obstacles:
-                obstacle.remove_from_space()
+        for obstacle in self.obstacles:
+            obstacle.remove_from_space()
 
-        # Create agent (automatically calls reset in constructor)
-        self.agent = Agent(self.space, self._get_random_position())
+        # Create agent
+        agent_pos = self._get_random_position()
+        self.agent = Agent(self.space, agent_pos)
 
-        # Create obstacles (automatically calls reset in constructor)
+        # Create obstacles from config or default
         self.obstacles = []
-        for _ in range(self.num_obstacles):
-            self.obstacles.append(
-                Obstacle(self.space, self._get_random_position())
-            )
+        if self.obstacles_config:
+            for i, obstacle_class in enumerate(self.obstacles_config):
+                obs_pos = self._get_random_position()
+                if isinstance(obstacle_class, type) and issubclass(
+                    obstacle_class, Entity
+                ):
+                    obstacle = obstacle_class(self.space, obs_pos)
+                    self.obstacles.append(obstacle)
+        else:
+            # Default: create 5 stable obstacles
+            for _ in range(5):
+                obs_pos = self._get_random_position()
+                obstacle = StableObstacle(self.space, obs_pos)
+                self.obstacles.append(obstacle)
 
         # Set target position
         self.target_position = self._get_random_position()
 
-        observation = self._get_obs()
+        observation = (
+            self._get_obs_vector()
+        )  # TODO: Replace with encoder output
         info = self._get_info()
         return observation, info
 
@@ -128,7 +142,9 @@ class KFEnv(gym.Env):
             obstacle.update(dt)
 
         # Calculate reward and check termination
-        observation = self._get_obs()
+        observation = (
+            self._get_obs_vector()
+        )  # TODO: Replace with encoder output
         reward = self._calculate_reward()
         terminated = self._check_collision()
         truncated = False
@@ -178,24 +194,21 @@ class KFEnv(gym.Env):
         y = random.uniform(-half_size, half_size)
         return Vector2D(x, y)
 
-    def _get_obs(self) -> np.ndarray:
-        if not self.agent:
-            return np.zeros(self.observation_space.shape[0], dtype=np.float32)
+    def _get_obs(self) -> Dict[str, Any]:
+        """Return observation as dictionary with entity objects"""
+        obs = {
+            "agent": self.agent,
+            "obstacles": self.obstacles,
+            "target": self.target_position,
+        }
+        return obs
 
-        agent_state = self.agent.get_state()
-
-        # Get obstacle positions
-        obstacle_positions = []
-        for obstacle in self.obstacles:
-            pos = obstacle.get_position()
-            obstacle_positions.extend([pos.x, pos.y])
-
-        # Pad if fewer obstacles than expected
-        while len(obstacle_positions) < self.num_obstacles * 2:
-            obstacle_positions.extend([0.0, 0.0])
-
-        obs = np.concatenate([agent_state, obstacle_positions])
-        return obs.astype(np.float32)
+    def _get_obs_vector(self) -> np.ndarray:
+        """TODO: This will be replaced by encoder
+        For now, return dummy observation vector
+        """
+        # This is a placeholder until encoder is implemented
+        return np.zeros(self.observation_space.shape[0], dtype=np.float32)
 
     def _calculate_reward(self) -> float:
         if not self.agent:

@@ -1,3 +1,3 @@
 from .entity import Entity
 from .agent import Agent
-from .obstacle import Obstacle
+from .stable_obstacle import StableObstacle
