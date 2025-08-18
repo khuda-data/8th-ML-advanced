@@ -1,4 +1,10 @@
 from enum import IntEnum
+from typing import NamedTuple
+
+
+class Vector2D(NamedTuple):
+    x: float
+    y: float
 
 
 class CollisionType(IntEnum):

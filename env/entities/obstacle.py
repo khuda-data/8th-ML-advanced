@@ -1,9 +1,8 @@
 import pymunk
 import numpy as np
 import random
-from typing import Tuple
 from .entity import Entity
-from .types import CollisionType
+from ..types import CollisionType, Vector2D
 
 
 class Obstacle(Entity):
@@ -12,7 +11,7 @@ class Obstacle(Entity):
     def __init__(
         self,
         space: pymunk.Space,
-        position: Tuple[float, float],
+        position: Vector2D,
         radius: float = 0.3,
         mass: float = 1.0,
         speed: float = 2.0,
@@ -30,13 +29,14 @@ class Obstacle(Entity):
         self.direction_change_timer = 0
         self.direction_change_interval = random.uniform(2.0, 5.0)
 
-        self._set_random_direction()
+        # Initialize obstacle state
+        self.reset(position)
 
     def _set_random_direction(self):
         angle = random.uniform(0, 2 * np.pi)
         velocity_x = self.speed * np.cos(angle)
         velocity_y = self.speed * np.sin(angle)
-        self.set_velocity((velocity_x, velocity_y))
+        self.set_velocity(Vector2D(velocity_x, velocity_y))
 
     def update(self, dt: float):
         self.direction_change_timer += dt
@@ -47,20 +47,16 @@ class Obstacle(Entity):
             self.direction_change_interval = random.uniform(2.0, 5.0)
 
         current_velocity = self.get_velocity()
-        current_speed = np.sqrt(
-            current_velocity[0] ** 2 + current_velocity[1] ** 2
-        )
+        current_speed = np.sqrt(current_velocity.x**2 + current_velocity.y**2)
 
         if current_speed > 0:
             scale = self.speed / current_speed
             self.set_velocity(
-                (current_velocity[0] * scale, current_velocity[1] * scale)
+                Vector2D(current_velocity.x * scale, current_velocity.y * scale)
             )
 
-    def reset(self, position: Tuple[float, float]):
-        self.set_position(position)
-        self.set_velocity((0, 0))
-        self.body.angular_velocity = 0
+    def reset(self, position: Vector2D):
+        super().reset(position)
         self.direction_change_timer = 0
         self.direction_change_interval = random.uniform(2.0, 5.0)
         self._set_random_direction()
