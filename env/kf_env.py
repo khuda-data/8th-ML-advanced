@@ -3,14 +3,11 @@ from gymnasium import spaces
 import pygame
 import pymunk
 import numpy as np
-import torch
-from torch import Tensor
 import random
 from typing import List, Optional, Tuple, Dict, Any
 
-from .types import CollisionType, Vector2D, Observation
+from .types import CollisionType, Vector2D
 from .entities import Agent, Entity
-from .encoders import BaseEncoder, PaddingEncoder
 
 
 class KFEnv(gym.Env):
@@ -20,28 +17,38 @@ class KFEnv(gym.Env):
         self,
         render_mode: Optional[str] = None,
         world_size: float = 20.0,
-        encoder: BaseEncoder = None,
+        max_obstacles: int = 10,
     ) -> None:
         super().__init__()
 
         self.render_mode = render_mode
         self.world_size = world_size
-
-        # Initialize encoder
-        if encoder is None:
-            self.encoder = PaddingEncoder(max_obstacles=10)  # Default value
-        else:
-            self.encoder = encoder
+        self.max_obstacles = max_obstacles
 
         self.action_space = spaces.Box(
             low=-1.0, high=1.0, shape=(2,), dtype=np.float32
         )
 
-        # Get observation space size from encoder
-        obs_dim = self.encoder.get_observation_space_size()
-
-        self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(obs_dim,), dtype=np.float32
+        # Define observation space as Dict with fixed-size arrays
+        # Each entity: [radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y] = 7 dimensions
+        self.observation_space = spaces.Dict(
+            {
+                "agent": spaces.Box(
+                    low=-np.inf, high=np.inf, shape=(7,), dtype=np.float32
+                ),
+                "obstacles": spaces.Box(
+                    low=-np.inf,
+                    high=np.inf,
+                    shape=(self.max_obstacles, 7),
+                    dtype=np.float32,
+                ),
+                "target": spaces.Box(
+                    low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32
+                ),
+                "mask": spaces.Box(
+                    low=0, high=1, shape=(self.max_obstacles,), dtype=np.float32
+                ),
+            }
         )
 
         pygame.init()
@@ -58,34 +65,7 @@ class KFEnv(gym.Env):
         self.obstacles: List[Entity] = []
         self.target_position: Vector2D = Vector2D(0, 0)
 
-        self._setup_boundaries()
-
         self.reset()
-
-    def _setup_boundaries(self) -> None:
-        """Create world boundaries"""
-        half_size = self.world_size / 2
-        thickness = 1.0
-
-        # Create static bodies for walls
-        walls = [
-            # Top
-            (0, half_size + thickness / 2, self.world_size, thickness),
-            # Bottom
-            (0, -half_size - thickness / 2, self.world_size, thickness),
-            # Left
-            (-half_size - thickness / 2, 0, thickness, self.world_size),
-            # Right
-            (half_size + thickness / 2, 0, thickness, self.world_size),
-        ]
-
-        for x, y, w, h in walls:
-            body = pymunk.Body(body_type=pymunk.Body.STATIC)
-            body.position = x, y
-            shape = pymunk.Poly.create_box(body, (w, h))
-            shape.friction = 0.7
-            shape.collision_type = CollisionType.WALL
-            self.space.add(body, shape)
 
     def add_agent(self, agent: Agent) -> None:
         """
@@ -99,6 +79,8 @@ class KFEnv(gym.Env):
             self.agent.remove_from_space()
 
         self.agent = agent
+        # Set world size for the agent
+        self.agent.world_size = self.world_size
         # Connect agent to this environment's space
         self.agent.set_space(self.space)
 
@@ -109,7 +91,14 @@ class KFEnv(gym.Env):
         Args:
             obstacle: Entity instance to add as obstacle
         """
+        if len(self.obstacles) >= self.max_obstacles:
+            raise ValueError(
+                f"Cannot add more than {self.max_obstacles} obstacles"
+            )
+
         self.obstacles.append(obstacle)
+        # Set world size for the obstacle
+        obstacle.world_size = self.world_size
         # Connect obstacle to this environment's space
         obstacle.set_space(self.space)
 
@@ -123,35 +112,35 @@ class KFEnv(gym.Env):
             obstacle.remove_from_space()
         self.obstacles = []
 
-    def get_obs_tensor(self) -> Tensor:
+    def get_obs_dict(self) -> Dict[str, np.ndarray]:
         """
-        Get observation as PyTorch tensor for neural network training
-
-        This tensor maintains gradient tracking for backpropagation through the encoder.
-        Use this method when you need the observation tensor for training agent/critic networks.
+        Get observation as dictionary with fixed-size numpy arrays
 
         Returns:
-            Encoded observation as PyTorch tensor with gradient tracking
+            Dictionary containing:
+            - agent: [radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y] (7,)
+            - obstacles: (max_obstacles, 7) array with padding
+            - target: [pos_x, pos_y] (2,)
+            - mask: (max_obstacles,) binary mask indicating valid obstacles
         """
-        return self._get_obs_tensor()
+        return self._get_obs_dict()
 
     def reset(
         self, seed: Optional[int] = None
-    ) -> Tuple[Tensor, Dict[str, Any]]:
+    ) -> Tuple[Dict[str, np.ndarray], Dict[str, Any]]:
         super().reset(seed=seed)
-        if self.agent is not None:
-            self.agent.reset()
 
-        for obstacle in self.obstacles:
-            obstacle.reset()
+        # Reset entities with random positions, ensuring no overlaps
+        self._reset_entities_safely()
 
         self.target_position = self._get_random_position()
 
-        observation = self._get_obs_tensor()
-        info = self._get_info()
-        return observation, info
+        observation = self._get_obs_dict()
+        return observation, {}
 
-    def step(self, action: np.ndarray) -> Tuple[Tensor, float, bool]:
+    def step(
+        self, action: np.ndarray
+    ) -> Tuple[Dict[str, np.ndarray], float, bool, bool, Dict[str, Any]]:
         if self.agent is not None:
             self.agent.apply_action(action)
 
@@ -159,16 +148,21 @@ class KFEnv(gym.Env):
         dt = 1.0 / self.metadata["render_fps"]
         self.space.step(dt)
 
+        # Update entities (this will calculate their accelerations)
         if self.agent is not None:
             self.agent.update(dt)
+
         for obstacle in self.obstacles:
             obstacle.update(dt)
 
-        observation = self._get_obs_tensor()
+        observation = self._get_obs_dict()
         reward = self._calculate_reward()
         terminated = self._check_collision()
+        truncated = (
+            self._check_out_of_bounds()
+        )  # Check if agent is out of bounds
 
-        return observation, reward, terminated
+        return observation, reward, terminated, truncated, {}
 
     def render(self) -> None:
         if self.render_mode is None:
@@ -212,18 +206,66 @@ class KFEnv(gym.Env):
         y = random.uniform(-half_size, half_size)
         return Vector2D(x, y)
 
-    def _get_obs(self) -> Observation:
-        """Return observation as typed Observation object with raw entities"""
-        return Observation(
-            agent=self.agent,
-            obstacles=self.obstacles,
-            target=self.target_position,
+    def _get_obs_dict(self) -> Dict[str, np.ndarray]:
+        """Return observation as dictionary with fixed-size numpy arrays"""
+        # Agent observation: [radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y]
+        if self.agent is not None:
+            agent_pos = self.agent.get_position()
+            agent_vel = self.agent.get_velocity()
+            agent_acc = self.agent.get_acceleration()
+            agent_obs = np.array(
+                [
+                    self.agent.radius,
+                    agent_pos.x,
+                    agent_pos.y,
+                    agent_vel.x,
+                    agent_vel.y,
+                    agent_acc.x,
+                    agent_acc.y,
+                ],
+                dtype=np.float32,
+            )
+        else:
+            agent_obs = np.zeros(7, dtype=np.float32)
+
+        # Target observation: [pos_x, pos_y]
+        target_obs = np.array(
+            [self.target_position.x, self.target_position.y], dtype=np.float32
         )
 
-    def _get_obs_tensor(self) -> Tensor:
-        """Return observation as encoded tensor for neural networks with gradient tracking"""
-        obs = self._get_obs()
-        return self.encoder.encode(obs)
+        # Obstacles observation: (max_obstacles, 7) with padding
+        obstacles_obs = np.zeros((self.max_obstacles, 7), dtype=np.float32)
+        mask = np.zeros(self.max_obstacles, dtype=np.float32)
+
+        for i, obstacle in enumerate(self.obstacles):
+            if i >= self.max_obstacles:
+                break
+
+            obs_pos = obstacle.get_position()
+            obs_vel = obstacle.get_velocity()
+            obs_acc = obstacle.get_acceleration()
+
+            obstacles_obs[i] = np.array(
+                [
+                    obstacle.radius,
+                    obs_pos.x,
+                    obs_pos.y,
+                    obs_vel.x,
+                    obs_vel.y,
+                    obs_acc.x,
+                    obs_acc.y,
+                ],
+                dtype=np.float32,
+            )
+
+            mask[i] = 1.0  # Mark as valid obstacle
+
+        return {
+            "agent": agent_obs,
+            "obstacles": obstacles_obs,
+            "target": target_obs,
+            "mask": mask,
+        }
 
     def _calculate_reward(self) -> float:
         if not self.agent:
@@ -250,7 +292,7 @@ class KFEnv(gym.Env):
 
         agent_pos = self.agent.get_position()
 
-        # Check collision with obstacles
+        # Check collision with obstacles only
         for obstacle in self.obstacles:
             obs_pos = obstacle.get_position()
             distance = np.sqrt(
@@ -259,12 +301,70 @@ class KFEnv(gym.Env):
             if distance < (self.agent.radius + obstacle.radius):
                 return True
 
-        # Check if agent is out of bounds
-        half_size = self.world_size / 2
-        if abs(agent_pos.x) > half_size or abs(agent_pos.y) > half_size:
-            return True
-
         return False
+
+    def _check_out_of_bounds(self) -> bool:
+        """Check if agent is out of world bounds"""
+        if not self.agent:
+            return False
+
+        agent_pos = self.agent.get_position()
+        half_size = self.world_size / 2
+
+        # Check if agent center is outside bounds
+        return abs(agent_pos.x) > half_size or abs(agent_pos.y) > half_size
+
+    def _reset_entities_safely(self) -> None:
+        """Reset all entities with random positions, ensuring no overlaps"""
+        occupied_positions = []
+
+        # Reset agent first
+        if self.agent is not None:
+            max_attempts = 100
+            for _ in range(max_attempts):
+                self.agent.reset(self.world_size)
+                agent_pos = self.agent.get_position()
+
+                # Check if position is valid (not overlapping with anything)
+                valid_position = True
+                for pos, radius in occupied_positions:
+                    distance = np.sqrt(
+                        (agent_pos.x - pos.x) ** 2 + (agent_pos.y - pos.y) ** 2
+                    )
+                    min_distance = (
+                        self.agent.radius + radius + 0.5
+                    )  # Add safety margin
+                    if distance < min_distance:
+                        valid_position = False
+                        break
+
+                if valid_position:
+                    occupied_positions.append((agent_pos, self.agent.radius))
+                    break
+
+        # Reset obstacles
+        for obstacle in self.obstacles:
+            max_attempts = 100
+            for _ in range(max_attempts):
+                obstacle.reset(self.world_size)
+                obs_pos = obstacle.get_position()
+
+                # Check if position is valid (not overlapping with anything)
+                valid_position = True
+                for pos, radius in occupied_positions:
+                    distance = np.sqrt(
+                        (obs_pos.x - pos.x) ** 2 + (obs_pos.y - pos.y) ** 2
+                    )
+                    min_distance = (
+                        obstacle.radius + radius + 0.5
+                    )  # Add safety margin
+                    if distance < min_distance:
+                        valid_position = False
+                        break
+
+                if valid_position:
+                    occupied_positions.append((obs_pos, obstacle.radius))
+                    break
 
     def close(self) -> None:
         pygame.quit()

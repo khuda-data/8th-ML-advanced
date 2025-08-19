@@ -9,18 +9,22 @@ class Entity:
 
     def __init__(
         self,
-        position: Vector2D,
         radius: float = 1.0,
         mass: float = 1.0,
         color: Tuple[int, int, int] = (100, 100, 100),
         collision_type: CollisionType = CollisionType.ENTITY,
+        world_size: float = 20.0,
     ):
         self.space: Optional[pymunk.Space] = None
         self.radius = radius
         self.color = color
         self.mass = mass
         self.collision_type = collision_type
-        self.initial_position = position
+        self.world_size = world_size
+
+        # Track previous velocity for acceleration calculation
+        self.previous_velocity = Vector2D(0, 0)
+        self.acceleration = Vector2D(0, 0)
 
         # Create physics body and shape but don't add to space yet
         moment = pymunk.moment_for_circle(mass, 0, radius)
@@ -29,7 +33,7 @@ class Entity:
         self.shape.friction = 0.7
         self.shape.collision_type = collision_type
 
-        self.reset(position)
+        self.reset()
 
     def set_space(self, space: pymunk.Space) -> None:
         """
@@ -51,6 +55,9 @@ class Entity:
 
     def get_velocity(self) -> Vector2D:
         return Vector2D(self.body.velocity.x, self.body.velocity.y)
+
+    def get_acceleration(self) -> Vector2D:
+        return self.acceleration
 
     def set_position(self, position: Vector2D):
         self.body.position = position.x, position.y
@@ -76,9 +83,26 @@ class Entity:
         pygame.draw.circle(screen, self.color, (screen_x, screen_y), radius)
         pygame.draw.circle(screen, (0, 0, 0), (screen_x, screen_y), radius, 2)
 
-    def update(self, dt: float):
-        """Override for entity-specific updates"""
-        pass
+    def update(self, delta_time: float):
+        """Update entity and calculate acceleration"""
+        current_velocity = self.get_velocity()
+
+        # Calculate acceleration based on velocity change
+        self.acceleration = Vector2D(
+            (
+                (current_velocity.x - self.previous_velocity.x) / delta_time
+                if delta_time > 0
+                else 0
+            ),
+            (
+                (current_velocity.y - self.previous_velocity.y) / delta_time
+                if delta_time > 0
+                else 0
+            ),
+        )
+
+        # Store current velocity for next update
+        self.previous_velocity = current_velocity
 
     def remove_from_space(self):
         """Remove this entity from its physics space"""
@@ -86,18 +110,30 @@ class Entity:
             self.space.remove(self.body, self.shape)
             self.space = None
 
-    def reset(self, position: Vector2D = None):
+    def reset(self, world_size: float = None):
         """
-        Reset entity to initial or specified position
+        Reset entity to a random position within world bounds
 
         Args:
-            position: Position to reset to, or None to use initial position
+            world_size: Size of the world, or None to use entity's world_size
         """
-        if position is None:
-            position = self.initial_position
-        else:
-            self.initial_position = position
+        if world_size is not None:
+            self.world_size = world_size
+
+        # Generate random position within world bounds
+        half_size = (
+            self.world_size / 2 - self.radius
+        )  # Leave margin for entity radius
+        import random
+
+        x = random.uniform(-half_size, half_size)
+        y = random.uniform(-half_size, half_size)
+        position = Vector2D(x, y)
 
         self.set_position(position)
         self.set_velocity(Vector2D(0, 0))
         self.body.angular_velocity = 0
+
+        # Reset acceleration tracking
+        self.previous_velocity = Vector2D(0, 0)
+        self.acceleration = Vector2D(0, 0)

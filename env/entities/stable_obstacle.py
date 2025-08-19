@@ -1,4 +1,3 @@
-import pymunk
 import numpy as np
 import random
 from .entity import Entity
