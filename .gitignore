@@ -1,8 +1,13 @@
-# Created by https://www.toptal.com/developers/gitignore/api/python,pycharm,visualstudiocode,dotenv
-# Edit at https://www.toptal.com/developers/gitignore?templates=python,pycharm,visualstudiocode,dotenv
+# Created by https://www.toptal.com/developers/gitignore/api/python,pycharm,visualstudiocode,cuda
+# Edit at https://www.toptal.com/developers/gitignore?templates=python,pycharm,visualstudiocode,cuda
 
-### dotenv ###
-.env
+### CUDA ###
+*.i
+*.ii
+*.gpu
+*.ptx
+*.cubin
+*.fatbin
 
 ### PyCharm ###
 # Covers JetBrains IDEs: IntelliJ, RubyMine, PhpStorm, AppCode, PyCharm, CLion, Android Studio, WebStorm and Rider
@@ -305,4 +310,4 @@ pyrightconfig.json
 .history
 .ionide
 
-# End of https://www.toptal.com/developers/gitignore/api/python,pycharm,visualstudiocode,dotenv
+# End of https://www.toptal.com/developers/gitignore/api/python,pycharm,visualstudiocode,cuda

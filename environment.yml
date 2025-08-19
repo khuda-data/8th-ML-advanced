@@ -1,9 +1,16 @@
 name: khudafinder
 channels:
+  - pytorch
   - conda-forge
+  - defaults
 dependencies:
   - python=3.12
+
   - pytorch
+  - torchvision
+  - torchaudio
+
   - gymnasium
   - pygame
   - pymunk
+  - stable-baselines3
