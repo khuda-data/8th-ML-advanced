@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 import numpy as np
 from ..types import Observation
+from torch import Tensor
 
 
 class BaseEncoder(ABC):
@@ -23,7 +24,7 @@ class BaseEncoder(ABC):
         pass
 
     @abstractmethod
-    def encode(self, observation: Observation) -> np.ndarray:
+    def encode(self, observation: Observation) -> Tensor:
         """
         Encode observation into a flat vector
 
