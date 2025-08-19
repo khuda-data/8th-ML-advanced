@@ -1,4 +1,6 @@
 import numpy as np
+import torch
+from torch import Tensor
 from typing import List, Dict, Any
 from .base_encoder import BaseEncoder
 from ..types import Observation, Vector2D
@@ -44,9 +46,9 @@ class PaddingEncoder(BaseEncoder):
         """
         return self._observation_size
 
-    def encode(self, observation: Observation) -> np.ndarray:
+    def encode(self, observation: Observation) -> Tensor:
         """
-        Encode observation into a flat vector with padding
+        Encode observation into a flat tensor with padding for neural networks
 
         Args:
             observation: Typed observation containing:
@@ -55,7 +57,7 @@ class PaddingEncoder(BaseEncoder):
                 - target: Vector2D target position
 
         Returns:
-            Encoded observation as numpy array with fixed size
+            Encoded observation as PyTorch tensor ready for agent/critic networks
         """
         # Extract components from typed observation
         agent = observation.agent
@@ -76,7 +78,8 @@ class PaddingEncoder(BaseEncoder):
             [agent_encoding, target_encoding, obstacles_encoding]
         )
 
-        return full_encoding
+        # Convert to PyTorch tensor for neural network input
+        return torch.tensor(full_encoding, dtype=torch.float32)
 
     def _encode_agent(self, agent: Agent) -> np.ndarray:
         """

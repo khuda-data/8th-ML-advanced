@@ -3,6 +3,8 @@ from gymnasium import spaces
 import pygame
 import pymunk
 import numpy as np
+import torch
+from torch import Tensor
 import random
 from typing import List, Optional, Tuple, Dict, Any
 
@@ -121,29 +123,35 @@ class KFEnv(gym.Env):
             obstacle.remove_from_space()
         self.obstacles = []
 
+    def get_obs_tensor(self) -> Tensor:
+        """
+        Get observation as PyTorch tensor for neural network training
+
+        This tensor maintains gradient tracking for backpropagation through the encoder.
+        Use this method when you need the observation tensor for training agent/critic networks.
+
+        Returns:
+            Encoded observation as PyTorch tensor with gradient tracking
+        """
+        return self._get_obs_tensor()
+
     def reset(
         self, seed: Optional[int] = None
-    ) -> Tuple[np.ndarray, Dict[str, Any]]:
+    ) -> Tuple[Tensor, Dict[str, Any]]:
         super().reset(seed=seed)
-
-        # Reset existing entities to their initial positions
         if self.agent is not None:
             self.agent.reset()
 
         for obstacle in self.obstacles:
             obstacle.reset()
 
-        # Set new target position
         self.target_position = self._get_random_position()
 
-        observation = self._get_obs_vector()
+        observation = self._get_obs_tensor()
         info = self._get_info()
         return observation, info
 
-    def step(
-        self, action: np.ndarray
-    ) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
-        # Apply action to agent
+    def step(self, action: np.ndarray) -> Tuple[Tensor, float, bool]:
         if self.agent is not None:
             self.agent.apply_action(action)
 
@@ -151,26 +159,22 @@ class KFEnv(gym.Env):
         dt = 1.0 / self.metadata["render_fps"]
         self.space.step(dt)
 
-        # Update entities
         if self.agent is not None:
             self.agent.update(dt)
         for obstacle in self.obstacles:
             obstacle.update(dt)
 
-        # Calculate reward and check termination
-        observation = self._get_obs_vector()
+        observation = self._get_obs_tensor()
         reward = self._calculate_reward()
         terminated = self._check_collision()
-        truncated = False
-        info = self._get_info()
 
-        return observation, reward, terminated, truncated, info
+        return observation, reward, terminated
 
     def render(self) -> None:
         if self.render_mode is None:
             return
 
-        self.screen.fill((255, 255, 255))  # White background
+        self.screen.fill((255, 255, 255))
 
         # Convert world coordinates to screen coordinates
         scale = self.screen_size / self.world_size
@@ -209,17 +213,17 @@ class KFEnv(gym.Env):
         return Vector2D(x, y)
 
     def _get_obs(self) -> Observation:
-        """Return observation as typed Observation object"""
+        """Return observation as typed Observation object with raw entities"""
         return Observation(
             agent=self.agent,
             obstacles=self.obstacles,
             target=self.target_position,
         )
 
-    def _get_obs_vector(self) -> np.ndarray:
-        """Return observation as encoded vector using the encoder"""
-        obs_dict = self._get_obs()
-        return self.encoder.encode(obs_dict)
+    def _get_obs_tensor(self) -> Tensor:
+        """Return observation as encoded tensor for neural networks with gradient tracking"""
+        obs = self._get_obs()
+        return self.encoder.encode(obs)
 
     def _calculate_reward(self) -> float:
         if not self.agent:
@@ -261,9 +265,6 @@ class KFEnv(gym.Env):
             return True
 
         return False
-
-    def _get_info(self) -> Dict[str, Any]:
-        return {}
 
     def close(self) -> None:
         pygame.quit()

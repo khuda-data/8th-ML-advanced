@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-import numpy as np
 from ..types import Observation
 from torch import Tensor
 
