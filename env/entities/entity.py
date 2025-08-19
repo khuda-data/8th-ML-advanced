@@ -44,7 +44,7 @@ class Entity:
         """
         # Remove from old space if exists
         if self.space is not None:
-            self.remove_from_space()
+            self.unset_space()
 
         self.space = space
         if self.space is not None:
@@ -104,7 +104,7 @@ class Entity:
         # Store current velocity for next update
         self.previous_velocity = current_velocity
 
-    def remove_from_space(self):
+    def unset_space(self):
         """Remove this entity from its physics space"""
         if self.space is not None and self.body in self.space.bodies:
             self.space.remove(self.body, self.shape)

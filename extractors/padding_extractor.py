@@ -2,13 +2,10 @@ import numpy as np
 import torch
 from torch import Tensor
 from typing import List, Dict, Any
-from .base_encoder import BaseEncoder
-from ..types import Observation, Vector2D
-from ..entities.entity import Entity
-from ..entities.agent import Agent
+from stable_baselines3.sac.policies
 
 
-class PaddingEncoder(BaseEncoder):
+class PaddingExtractor():
     """
     Encoder that uses padding to handle variable number of obstacles.
     Always encodes a fixed number of obstacles, padding with zeros when fewer obstacles exist.

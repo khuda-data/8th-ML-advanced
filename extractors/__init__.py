@@ -1,4 +1,3 @@
-from .base_encoder import BaseEncoder
-from .padding_encoder import PaddingEncoder
+from .padding_extractor import PaddingExtractor
 
-__all__ = ["BaseEncoder", "PaddingEncoder"]
+__all__ = ["PaddingExtractor"]
