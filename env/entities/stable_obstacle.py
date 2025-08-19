@@ -13,7 +13,6 @@ class StableObstacle(Entity):
         radius: float = 0.3,
         mass: float = 1.0,
         speed: float = 2.0,
-        direction: Vector2D = None,
     ):
         super().__init__(
             position,
@@ -24,32 +23,10 @@ class StableObstacle(Entity):
         )
 
         self.speed = speed
-        self.direction = direction
 
-        self.reset(position=position, direction=direction)
+    def update(self, dt: float):
+        super().update(dt)
 
-    def _initialize_movement(self):
-        """Initialize movement with stable direction and speed"""
-        if self.direction is None:
-            # Set random direction if not specified
-            angle = random.uniform(0, 2 * np.pi)
-            self.direction = Vector2D(np.cos(angle), np.sin(angle))
-
-        # Normalize direction and apply speed
-        direction_magnitude = np.sqrt(self.direction.x**2 + self.direction.y**2)
-        if direction_magnitude > 0:
-            normalized_direction = Vector2D(
-                self.direction.x / direction_magnitude,
-                self.direction.y / direction_magnitude,
-            )
-            velocity = Vector2D(
-                normalized_direction.x * self.speed,
-                normalized_direction.y * self.speed,
-            )
-            self.set_velocity(velocity)
-
-    def update(self, delta_time: float):
-        """Maintain constant velocity"""
         # Ensure velocity remains constant (in case of physics interference)
         current_velocity = self.get_velocity()
         current_speed = np.sqrt(current_velocity.x**2 + current_velocity.y**2)
@@ -65,9 +42,20 @@ class StableObstacle(Entity):
                     )
                 )
 
-    def reset(self, position: Vector2D, direction: Vector2D = None):
-        """Reset obstacle to initial state with optional new direction"""
-        super().reset(position)
-        if direction is not None:
-            self.direction = direction
-        self._initialize_movement()
+    def reset(self):
+        super().reset()
+
+        angle = random.uniform(0, 2 * np.pi)
+        direction = Vector2D(np.cos(angle), np.sin(angle))
+
+        direction_magnitude = np.sqrt(direction.x**2 + direction.y**2)
+        if direction_magnitude > 0:
+            normalized_direction = Vector2D(
+                direction.x / direction_magnitude,
+                direction.y / direction_magnitude,
+            )
+            velocity = Vector2D(
+                normalized_direction.x * self.speed,
+                normalized_direction.y * self.speed,
+            )
+            self.set_velocity(velocity)

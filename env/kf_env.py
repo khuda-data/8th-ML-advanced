@@ -3,8 +3,7 @@ from gymnasium import spaces
 import pygame
 import pymunk
 import numpy as np
-import random
-from typing import List, Optional, Tuple, Dict, Any
+from typing import List, Optional, Tuple, Dict, Any, Type
 
 from .types import CollisionType, Vector2D
 from .entities import Agent, Entity
@@ -58,92 +57,78 @@ class KFEnv(gym.Env):
         self.clock = pygame.time.Clock()
 
         self.space = pymunk.Space()
-        self.space.gravity = (0, 0)  # No gravity for top-down view
+        self.space.gravity = (0, 0)
 
         self.agent: Optional[Agent] = None
         self.obstacles: List[Entity] = []
         self.target_position: Vector2D = Vector2D(0, 0)
 
-        # Collision flag for pymunk collision handler
         self.collision_occurred = False
 
-        # Setup collision handlers
-        self._setup_collision_handlers()
-
-        self.reset()
-
-    def _get_all_entities(self) -> List[Entity]:
-        """Get list of all entities (agent + obstacles)"""
-        all_entities = []
-        if self.agent is not None:
-            all_entities.append(self.agent)
-        all_entities.extend(self.obstacles)
-        return all_entities
-
-    def _setup_collision_handlers(self) -> None:
-        """Setup pymunk collision handlers for different collision types"""
-        # Agent-Obstacle collision handler
         handler = self.space.add_collision_handler(
             CollisionType.AGENT, CollisionType.OBSTACLE
         )
         handler.begin = self._on_agent_collision
 
-        # Agent-Entity collision handler (for generic entities)
         handler2 = self.space.add_collision_handler(
             CollisionType.AGENT, CollisionType.ENTITY
         )
         handler2.begin = self._on_agent_collision
 
+        self.reset()
+
+    def _get_entities(self) -> List[Entity]:
+        entities = []
+        if self.agent is not None:
+            entities.append(self.agent)
+        entities.extend(self.obstacles)
+        return entities
+
     def _on_agent_collision(self, arbiter, space, data):
-        """Collision callback for agent-obstacle collisions"""
         self.collision_occurred = True
-        return True  # Allow collision to proceed normally
+        return True
 
-    def add_agent(self, agent: Agent) -> None:
-        """
-        Add an agent to the environment
-
-        Args:
-            agent: Agent instance to add
-        """
-        # Remove existing agent if present
+    def add_agent(self, agent_class: Type[Agent] = Agent, **kwargs) -> Agent:
         if self.agent is not None:
             self.agent.unset_space()
 
-        self.agent = agent
-        # Set world size for the agent
-        self.agent.world_size = self.world_size
-        # Connect agent to this environment's space
-        self.agent.set_space(self.space)
+        self.agent = self._add_entity(agent_class, **kwargs)
+        return self.agent
 
-    def add_obstacle(self, obstacle: Entity) -> None:
-        """
-        Add an obstacle to the environment
-
-        Args:
-            obstacle: Entity instance to add as obstacle
-        """
+    def add_obstacle(
+        self, obstacle_class: Type[Entity] = Entity, **kwargs
+    ) -> Entity:
         if len(self.obstacles) >= self.max_obstacles:
             raise ValueError(
                 f"Cannot add more than {self.max_obstacles} obstacles"
             )
 
+        obstacle = self._add_entity(obstacle_class, **kwargs)
         self.obstacles.append(obstacle)
-        # Set world size for the obstacle
-        obstacle.world_size = self.world_size
-        # Set collision type to OBSTACLE for proper collision handling
-        obstacle.collision_type = CollisionType.OBSTACLE
-        obstacle.shape.collision_type = CollisionType.OBSTACLE
-        # Connect obstacle to this environment's space
-        obstacle.set_space(self.space)
+        return obstacle
 
-    def clear_all_entities(self) -> None:
-        """Clear all entities from the environment (public method)"""
-        # Clear all entities
-        for entity in self._get_all_entities():
+    def _add_entity(
+        self, entity_class: Type[Entity] = Entity, **kwargs
+    ) -> Entity:
+        entity = entity_class(**kwargs)
+
+        unsafe_areas = []
+        for other_entity in self._get_entities():
+            if other_entity != entity:
+                unsafe_areas.append(
+                    (other_entity.get_position(), other_entity.radius)
+                )
+
+        self._reset_entity(
+            entity, self._find_safe_position(entity.radius, unsafe_areas)
+        )
+
+        entity.set_space(self.space)
+
+    def clear_entities(self) -> None:
+        for entity in self._get_entities():
             entity.unset_space()
 
-        # Reset references
         self.agent = None
         self.obstacles = []
 
@@ -152,11 +137,16 @@ class KFEnv(gym.Env):
     ) -> Tuple[Dict[str, np.ndarray], Dict[str, Any]]:
         super().reset(seed=seed)
 
-        # Reset collision flag
         self.collision_occurred = False
 
-        # Reset entities with random positions, ensuring no overlaps
-        self._reset_entities_safely()
+        unsafe_areas = []
+
+        for entity in self._get_entities():
+            safe_position = self._find_safe_position(
+                entity.radius, unsafe_areas
+            )
+            self._reset_entity(entity, safe_position)
+            unsafe_areas.append((safe_position, entity.radius))
 
         self.target_position = self._get_random_position()
 
@@ -170,12 +160,11 @@ class KFEnv(gym.Env):
         if self.agent is not None:
             self.agent.apply_action(action)
 
-        # Update physics (collision handlers will set collision_occurred flag)
+        # Update physics
         dt = 1.0 / self.metadata["render_fps"]
         self.space.step(dt)
 
-        # Update all entities (this will calculate their accelerations)
-        for entity in self._get_all_entities():
+        for entity in self._get_entities():
             entity.update(dt)
 
         observation = self._get_obs_dict()
@@ -202,8 +191,7 @@ class KFEnv(gym.Env):
             self.screen, (0, 255, 0), (target_screen_x, target_screen_y), 20, 3
         )
 
-        # Draw entities using their render methods
-        for entity in self._get_all_entities():
+        for entity in self._get_entities():
             entity.render(self.screen, scale, offset)
 
         # Draw boundaries
@@ -218,10 +206,10 @@ class KFEnv(gym.Env):
             pygame.display.flip()
             self.clock.tick(self.metadata["render_fps"])
 
-    def _get_random_position(self) -> Vector2D:
-        half_size = self.world_size / 2 - 2  # Leave margin from walls
-        x = random.uniform(-half_size, half_size)
-        y = random.uniform(-half_size, half_size)
+    def _get_random_position(self, radius: float = 2.0) -> Vector2D:
+        half_size = self.world_size / 2 - radius
+        x = self.np_random.uniform(-half_size, half_size)
+        y = self.np_random.uniform(-half_size, half_size)
         return Vector2D(x, y)
 
     def _get_obs_dict(self) -> Dict[str, np.ndarray]:
@@ -305,37 +293,37 @@ class KFEnv(gym.Env):
         # Check if agent center is outside bounds
         return abs(agent_pos.x) > half_size or abs(agent_pos.y) > half_size
 
-    def _reset_entities_safely(self) -> None:
-        """Reset all entities with random positions, ensuring no overlaps"""
-        occupied_positions = []
+    def _reset_entity(self, entity: Entity, position: Vector2D):
+        entity.set_position(position)
+        entity.reset()
 
-        # Reset all entities with overlap checking (agent first, then obstacles)
-        for entity in self._get_all_entities():
-            max_attempts = 100
-            for _ in range(max_attempts):
-                # Use entity's own reset function
-                entity.reset(self.world_size)
-                entity_pos = entity.get_position()
-
-                # Check if position is valid (not overlapping with anything)
-                if self._is_position_safe(
-                    entity_pos, entity.radius, occupied_positions
-                ):
-                    occupied_positions.append((entity_pos, entity.radius))
-                    break
-
-    def _is_position_safe(
+    def _find_safe_position(
         self,
-        position: Vector2D,
-        entity_radius: float,
-        occupied_positions: List[Tuple[Vector2D, float]],
+        radius: float,
+        unsafe_areas: List[Tuple[Vector2D, float]],
+        max_attempts: int = 100,
+    ) -> Optional[Vector2D]:
+        for _ in range(max_attempts):
+            position = self._get_random_position(radius=radius)
+
+            if self._is_safe_area((position, radius), unsafe_areas):
+                return position
+
+        return Vector2D(0, 0)
+
+    def _is_safe_area(
+        self,
+        candidate_area: Tuple[Vector2D, float],
+        unsafe_areas: List[Tuple[Vector2D, float]],
+        margin=0.5,
     ) -> bool:
-        """Check if a position is safe (doesn't overlap with existing entities)"""
-        for pos, radius in occupied_positions:
+        candidate_position, candidate_radius = candidate_area
+        for unsafe_position, unsafe_radius in unsafe_areas:
             distance = np.sqrt(
-                (position.x - pos.x) ** 2 + (position.y - pos.y) ** 2
+                (candidate_position.x - unsafe_position.x) ** 2
+                + (candidate_position.y - unsafe_position.y) ** 2
             )
-            min_distance = entity_radius + radius + 0.5  # Add safety margin
+            min_distance = candidate_radius + unsafe_radius + margin
             if distance < min_distance:
                 return False
         return True

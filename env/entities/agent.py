@@ -13,19 +13,17 @@ class Agent(Entity):
         mass: float = 1.0,
         max_force: float = 100.0,
         max_acceleration: float = 10.0,
-        world_size: float = 20.0,
     ):
         super().__init__(
             radius=radius,
             mass=mass,
             color=(0, 100, 255),
             collision_type=CollisionType.AGENT,
-            world_size=world_size,
         )
 
         self.max_acceleration = max_acceleration
         self.max_force = max_force
-        self.max_velocity = 10.0  # m/s
+        self.max_velocity = 10.0
 
     def apply_acceleration(self, acceleration: Vector2D):
         force_x = self.body.mass * acceleration.x
@@ -47,9 +45,8 @@ class Agent(Entity):
             )
         )
 
-    def update(self, delta_time: float):
-        # First call parent update to calculate acceleration
-        super().update(delta_time)
+    def update(self, dt: float):
+        super().update(dt)
 
         # Then apply velocity constraints
         velocity = self.get_velocity()
