@@ -13,18 +13,15 @@ hyperparameters = {
     'fc2_dims': 256,
 }
 
-class KHUDA_Finder_CriticNetwork(nn.Module):
+class KFCriticNetwork(nn.Module):
     def __init__(self, hparams, input_dims, n_actions,
-                 name='critic', chkpt_dir='critic_project/trial_1'):
+                 name='critic'):
         super(KHUDA_Finder_CriticNetwork, self).__init__()
         self.input_dims = input_dims
         self.n_actions = n_actions
         self.name = name
-        self.checkpoint_dir = chkpt_dir
-        self.checkpoint_file = os.path.join(self.checkpoint_dir, name+'1')
 
         learning_rate = hparams['learning_rate']
-        optimizer_class = hparams['optimizer']
         self.activation_fn = hparams['activation']
         fc1_dims = hparams['fc1_dims']
         fc2_dims = hparams['fc2_dims']
