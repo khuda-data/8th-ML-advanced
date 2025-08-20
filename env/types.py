@@ -1,10 +1,7 @@
 from enum import IntEnum
-from typing import NamedTuple
+import pygame
 
-
-class Vector2D(NamedTuple):
-    x: float
-    y: float
+Vector2D = pygame.Vector2
 
 
 class CollisionType(IntEnum):

@@ -17,12 +17,14 @@ class KFEnv(gym.Env):
         render_mode: Optional[str] = None,
         world_size: float = 20.0,
         max_obstacles: int = 10,
+        target_radius: float = 1.0,
     ) -> None:
         super().__init__()
 
         self.render_mode = render_mode
         self.world_size = world_size
         self.max_obstacles = max_obstacles
+        self.target_radius = target_radius
 
         self.action_space = spaces.Box(
             low=-1.0, high=1.0, shape=(2,), dtype=np.float32
@@ -169,7 +171,7 @@ class KFEnv(gym.Env):
 
         observation = self._get_obs_dict()
         reward = self._calculate_reward()
-        terminated = self.collision_occurred
+        terminated = self.collision_occurred or self._check_target_reached()
         truncated = self._check_out_of_bounds()
 
         return observation, reward, terminated, truncated, {}
@@ -187,8 +189,13 @@ class KFEnv(gym.Env):
         # Draw target
         target_screen_x = int(self.target_position.x * scale + offset)
         target_screen_y = int(self.target_position.y * scale + offset)
+        target_screen_radius = int(self.target_radius * scale)
         pygame.draw.circle(
-            self.screen, (0, 255, 0), (target_screen_x, target_screen_y), 20, 3
+            self.screen,
+            (0, 255, 0),
+            (target_screen_x, target_screen_y),
+            target_screen_radius,
+            3,
         )
 
         for entity in self._get_entities():
@@ -268,19 +275,23 @@ class KFEnv(gym.Env):
             return 0.0
 
         agent_pos = self.agent.get_position()
-        distance_to_target = np.sqrt(
-            (agent_pos.x - self.target_position.x) ** 2
-            + (agent_pos.y - self.target_position.y) ** 2
-        )
+        distance_to_target = agent_pos.distance_to(self.target_position)
 
-        # Negative distance as reward (closer is better)
         reward = -distance_to_target * 0.1
 
-        # Bonus for reaching target
-        if distance_to_target < 1.0:
-            reward += 10.0
+        if self._check_target_reached():
+            reward += 100.0
 
         return reward
+
+    def _check_target_reached(self) -> bool:
+        if not self.agent:
+            return False
+
+        agent_pos = self.agent.get_position()
+        distance_to_target = agent_pos.distance_to(self.target_position)
+
+        return distance_to_target < self.target_radius
 
     def _check_out_of_bounds(self) -> bool:
         """Check if agent is out of world bounds"""
@@ -319,10 +330,7 @@ class KFEnv(gym.Env):
     ) -> bool:
         candidate_position, candidate_radius = candidate_area
         for unsafe_position, unsafe_radius in unsafe_areas:
-            distance = np.sqrt(
-                (candidate_position.x - unsafe_position.x) ** 2
-                + (candidate_position.y - unsafe_position.y) ** 2
-            )
+            distance = candidate_position.distance_to(unsafe_position)
             min_distance = candidate_radius + unsafe_radius + margin
             if distance < min_distance:
                 return False
