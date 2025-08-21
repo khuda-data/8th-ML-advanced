@@ -1,7 +1,8 @@
 import pymunk
 import numpy as np
+from pygame import Vector2
 from .entity import Entity
-from ..types import CollisionType, Vector2D
+from ..types import CollisionType
 
 
 class Agent(Entity):
@@ -25,7 +26,7 @@ class Agent(Entity):
         self.max_force = max_force
         self.max_velocity = 10.0
 
-    def apply_acceleration(self, acceleration: Vector2D):
+    def apply_acceleration(self, acceleration: Vector2):
         force_x = self.body.mass * acceleration.x
         force_y = self.body.mass * acceleration.y
 
@@ -35,11 +36,11 @@ class Agent(Entity):
             force_x *= scale
             force_y *= scale
 
-        self.apply_force(Vector2D(force_x, force_y))
+        self.apply_force(Vector2(force_x, force_y))
 
     def apply_action(self, action: np.ndarray):
         self.apply_acceleration(
-            Vector2D(
+            Vector2(
                 action[0] * self.max_acceleration,
                 action[1] * self.max_acceleration,
             )
@@ -54,4 +55,4 @@ class Agent(Entity):
 
         if speed > self.max_velocity:
             scale = self.max_velocity / speed
-            self.set_velocity(Vector2D(velocity.x * scale, velocity.y * scale))
+            self.set_velocity(Vector2(velocity.x * scale, velocity.y * scale))

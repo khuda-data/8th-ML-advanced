@@ -1,7 +1,4 @@
 from enum import IntEnum
-import pygame
-
-Vector2D = pygame.Vector2
 
 
 class CollisionType(IntEnum):

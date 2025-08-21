@@ -1,7 +1,8 @@
 import numpy as np
 import random
+from pygame import Vector2
 from .entity import Entity
-from ..types import CollisionType, Vector2D
+from ..types import CollisionType
 
 
 class StableObstacle(Entity):
@@ -9,7 +10,7 @@ class StableObstacle(Entity):
 
     def __init__(
         self,
-        position: Vector2D,
+        position: Vector2,
         radius: float = 0.3,
         mass: float = 1.0,
         speed: float = 2.0,
@@ -37,7 +38,7 @@ class StableObstacle(Entity):
             if current_speed > 0:
                 scale = self.speed / current_speed
                 self.set_velocity(
-                    Vector2D(
+                    Vector2(
                         current_velocity.x * scale, current_velocity.y * scale
                     )
                 )
@@ -46,15 +47,15 @@ class StableObstacle(Entity):
         super().reset()
 
         angle = random.uniform(0, 2 * np.pi)
-        direction = Vector2D(np.cos(angle), np.sin(angle))
+        direction = Vector2(np.cos(angle), np.sin(angle))
 
         direction_magnitude = np.sqrt(direction.x**2 + direction.y**2)
         if direction_magnitude > 0:
-            normalized_direction = Vector2D(
+            normalized_direction = Vector2(
                 direction.x / direction_magnitude,
                 direction.y / direction_magnitude,
             )
-            velocity = Vector2D(
+            velocity = Vector2(
                 normalized_direction.x * self.speed,
                 normalized_direction.y * self.speed,
             )

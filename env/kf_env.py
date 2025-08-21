@@ -1,11 +1,12 @@
 import gymnasium as gym
 from gymnasium import spaces
 import pygame
+from pygame import Vector2
 import pymunk
 import numpy as np
 from typing import List, Optional, Tuple, Dict, Any, Type
 
-from .types import CollisionType, Vector2D
+from .types import CollisionType
 from .entities import Agent, Entity
 
 
@@ -63,7 +64,7 @@ class KFEnv(gym.Env):
 
         self.agent: Optional[Agent] = None
         self.obstacles: List[Entity] = []
-        self.target_position: Vector2D = Vector2D(0, 0)
+        self.target_position: Vector2 = Vector2(0, 0)
 
         self.collision_occurred = False
 
@@ -213,11 +214,11 @@ class KFEnv(gym.Env):
             pygame.display.flip()
             self.clock.tick(self.metadata["render_fps"])
 
-    def _get_random_position(self, radius: float = 2.0) -> Vector2D:
+    def _get_random_position(self, radius: float = 2.0) -> Vector2:
         half_size = self.world_size / 2 - radius
         x = self.np_random.uniform(-half_size, half_size)
         y = self.np_random.uniform(-half_size, half_size)
-        return Vector2D(x, y)
+        return Vector2(x, y)
 
     def _get_obs_dict(self) -> Dict[str, np.ndarray]:
         """Return observation as dictionary with fixed-size numpy arrays"""
@@ -304,28 +305,28 @@ class KFEnv(gym.Env):
         # Check if agent center is outside bounds
         return abs(agent_pos.x) > half_size or abs(agent_pos.y) > half_size
 
-    def _reset_entity(self, entity: Entity, position: Vector2D):
+    def _reset_entity(self, entity: Entity, position: Vector2):
         entity.set_position(position)
         entity.reset()
 
     def _find_safe_position(
         self,
         radius: float,
-        unsafe_areas: List[Tuple[Vector2D, float]],
+        unsafe_areas: List[Tuple[Vector2, float]],
         max_attempts: int = 100,
-    ) -> Optional[Vector2D]:
+    ) -> Optional[Vector2]:
         for _ in range(max_attempts):
             position = self._get_random_position(radius=radius)
 
             if self._is_safe_area((position, radius), unsafe_areas):
                 return position
 
-        return Vector2D(0, 0)
+        return Vector2(0, 0)
 
     def _is_safe_area(
         self,
-        candidate_area: Tuple[Vector2D, float],
-        unsafe_areas: List[Tuple[Vector2D, float]],
+        candidate_area: Tuple[Vector2, float],
+        unsafe_areas: List[Tuple[Vector2, float]],
         margin=0.5,
     ) -> bool:
         candidate_position, candidate_radius = candidate_area
