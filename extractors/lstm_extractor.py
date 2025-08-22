@@ -10,17 +10,10 @@ class LSTMExtractor(BaseFeaturesExtractor):
     Converts multi-input observations into feature vectors using an LSTM-based extractor.
 
     Expected input (each tensor has a batch dimension [B] added by SB3):
-      - obs["agent"]     : [B, A]            - [vel_x, vel_y] or [vel_x, vel_y, acc_x, acc_y]
-      - obs["target"]    : [B, T]            - [pos_x, pos_y]
-      - obs["obstacles"] : [B, N, F]         - [rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y, acc_x, acc_y]
-      - obs["mask"]      : [B, N]            - [valid_obstacle_1, ..., valid_obstacle_N]
-
-    Output:
-      - features         : [B, features_dim] - Extracted feature vector
-
-    Notes:
-      - Pass the same `features_dim` as padding_extractor in `policy_kwargs`.
-      - The LSTM treats the obstacles dimension (N) as the sequence length and uses the last hidden state.
+      - observation["agent"]     : [B, A]            - [vel_x, vel_y] or [vel_x, vel_y, acc_x, acc_y]
+      - observation["target"]    : [B, T]            - [pos_x, pos_y]
+      - observation["obstacles"] : [B, N, F]         - [rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y, acc_x, acc_y]
+      - observation["mask"]      : [B, N]            - [valid_obstacle_1, ..., valid_obstacle_N]
     """
 
     def __init__(
@@ -34,7 +27,6 @@ class LSTMExtractor(BaseFeaturesExtractor):
     ) -> None:
         super().__init__(observation_space, features_dim)
 
-        # Extract dimensions from observation space
         agent_dim  = int(observation_space["agent"].shape[-1])  # [vel_x, vel_y] or [vel_x, vel_y, acc_x, acc_y]
         target_dim = int(observation_space["target"].shape[-1])  # [pos_x, pos_y]
 
@@ -49,7 +41,6 @@ class LSTMExtractor(BaseFeaturesExtractor):
         assert len(mask_space.shape) == 1 and int(mask_space.shape[0]) == self.max_obstacles, \
             "mask must have shape (N,) and match obstacles' first dim"
 
-        # LSTM backbone (encodes obstacle sequences)
         self.bidirectional = bidirectional
         self.lstm = nn.LSTM(
             input_size=obs_feat_dim,
@@ -68,7 +59,6 @@ class LSTMExtractor(BaseFeaturesExtractor):
         layers.append(nn.ReLU())
         self.proj = nn.Sequential(*layers)
 
-        # Final output dimension referenced by SB3
         self.features_dim = features_dim
 
     @torch.no_grad()
@@ -87,10 +77,10 @@ class LSTMExtractor(BaseFeaturesExtractor):
         """
         Generates feature vectors from the observation dictionary, returning [B, features_dim].
         """
-        agent      = obs["agent"].float()        # [B, A] - [vel_x, vel_y] or [vel_x, vel_y, acc_x, acc_y]
-        target     = obs["target"].float()       # [B, T] - [pos_x, pos_y]
-        obstacles  = obs["obstacles"].float()    # [B, N, F] - [rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y, acc_x, acc_y]
-        mask       = obs["mask"].float()         # [B, N] - [valid_obstacle_1, ..., valid_obstacle_N]
+        agent      = obs["agent"]        # [B, A] - [vel_x, vel_y] or [vel_x, vel_y, acc_x, acc_y]
+        target     = obs["target"]       # [B, T] - [pos_x, pos_y]
+        obstacles  = obs["obstacles"]    # [B, N, F] - [rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y, acc_x, acc_y]
+        mask       = obs["mask"]         # [B, N] - [valid_obstacle_1, ..., valid_obstacle_N]
 
         B, N, F = obstacles.shape  # Batch size, max obstacles, obstacle features
 
@@ -109,7 +99,6 @@ class LSTMExtractor(BaseFeaturesExtractor):
         else:
             lstm_feat = h_n[-1]  # [B, H]
 
-        # Combine Agent/Target with LSTM output and project to features_dim
         fused = torch.cat([agent, target, lstm_feat], dim=1)  # [B, A+T+H]
         features = self.proj(fused)                           # [B, features_dim]
         return features
