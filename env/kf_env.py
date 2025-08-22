@@ -7,7 +7,7 @@ import numpy as np
 from typing import List, Optional, Tuple, Dict, Any, Type
 
 from .types import CollisionType
-from .entities import Agent, Entity
+from .entities import Agent, Entity, StableObstacle
 
 
 class KFEnv(gym.Env):
@@ -101,7 +101,7 @@ class KFEnv(gym.Env):
         return self.agent
 
     def add_obstacle(
-        self, obstacle_class: Type[Entity] = Entity, **kwargs
+        self, obstacle_class: Type[Entity] = StableObstacle, **kwargs
     ) -> Entity:
         if len(self.obstacles) >= self.max_obstacles:
             raise ValueError(
