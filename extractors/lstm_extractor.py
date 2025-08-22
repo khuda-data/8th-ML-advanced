@@ -36,11 +36,15 @@ class LSTMExtractor(BaseFeaturesExtractor):
         # same feature sizing rules as padding_extractor
         self.max_obstacles = max_obstacles
         self.include_acceleration = include_acceleration
-        self._agent_size = 4 if include_acceleration else 2   # [vel_x, vel_y] or [vel_x, vel_y, acc_x, acc_y]
-        self._target_size = 2                                 # [pos_x, pos_y]
+        self._agent_size = (
+            4 if include_acceleration else 2
+        )  # [vel_x, vel_y] or [vel_x, vel_y, acc_x, acc_y]
+        self._target_size = 2  # [pos_x, pos_y]
         self._obstacle_size = 6 if include_acceleration else 4
         self._obstacles_total_size = self._obstacle_size * max_obstacles
-        out_dim = self._agent_size + self._target_size + self._obstacles_total_size
+        out_dim = (
+            self._agent_size + self._target_size + self._obstacles_total_size
+        )
 
         super().__init__(observation_space, out_dim)
 
@@ -75,24 +79,24 @@ class LSTMExtractor(BaseFeaturesExtractor):
 
     def _build_relative_obstacle_feats(
         self,
-        agent_data: torch.Tensor,       # [batch_size, 7] - [radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y]
-        obstacles_data: torch.Tensor,   # [batch_size, max_obstacles, 7]
-        mask: torch.Tensor,             # [batch_size, max_obstacles]
+        agent_data: torch.Tensor,  # [batch_size, 7] - [radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y]
+        obstacles_data: torch.Tensor,  # [batch_size, max_obstacles, 7]
+        mask: torch.Tensor,  # [batch_size, max_obstacles]
     ) -> torch.Tensor:
         """
         Compute per-obstacle relative features with respect to agent.
         Returns [batch_size, max_obstacles, obstacle_feature_size], masked where invalid.
         """
-        agent_pos = agent_data[:, [1, 2]].unsqueeze(1)   # [pos_x, pos_y]
-        agent_vel = agent_data[:, [3, 4]].unsqueeze(1)   # [vel_x, vel_y]
-        obs_pos = obstacles_data[:, :, [1, 2]]           # [pos_x, pos_y]
-        obs_vel = obstacles_data[:, :, [3, 4]]           # [vel_x, vel_y]
+        agent_pos = agent_data[:, [1, 2]].unsqueeze(1)  # [pos_x, pos_y]
+        agent_vel = agent_data[:, [3, 4]].unsqueeze(1)  # [vel_x, vel_y]
+        obs_pos = obstacles_data[:, :, [1, 2]]  # [pos_x, pos_y]
+        obs_vel = obstacles_data[:, :, [3, 4]]  # [vel_x, vel_y]
 
-        rel_pos = obs_pos - agent_pos                    # [rel_pos_x, rel_pos_y]
-        rel_vel = obs_vel - agent_vel                    # [rel_vel_x, rel_vel_y]
+        rel_pos = obs_pos - agent_pos  # [rel_pos_x, rel_pos_y]
+        rel_vel = obs_vel - agent_vel  # [rel_vel_x, rel_vel_y]
 
         if self.include_acceleration:
-            obs_acc = obstacles_data[:, :, [5, 6]]       # [acc_x, acc_y]
+            obs_acc = obstacles_data[:, :, [5, 6]]  # [acc_x, acc_y]
             feats = torch.cat([rel_pos, rel_vel, obs_acc], dim=-1)
         else:
             feats = torch.cat([rel_pos, rel_vel], dim=-1)
@@ -104,21 +108,29 @@ class LSTMExtractor(BaseFeaturesExtractor):
         """
         Forward pass returning [batch_size, features_dim].
         """
-        agent_data = observations["agent"]         # [radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y]
-        obstacles_data = observations["obstacles"] # [radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y] per obstacle
-        target_data = observations["target"]       # [pos_x, pos_y]
-        mask = observations["mask"]                # obstacle validity mask
+        agent_data = observations[
+            "agent"
+        ]  # [radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y]
+        obstacles_data = observations[
+            "obstacles"
+        ]  # [radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y] per obstacle
+        target_data = observations["target"]  # [pos_x, pos_y]
+        mask = observations["mask"]  # obstacle validity mask
 
         # agent velocity (+acceleration if enabled)
         if self.include_acceleration:
-            agent_features = agent_data[:, [3, 4, 5, 6]]  # [vel_x, vel_y, acc_x, acc_y]
+            agent_features = agent_data[
+                :, [3, 4, 5, 6]
+            ]  # [vel_x, vel_y, acc_x, acc_y]
         else:
-            agent_features = agent_data[:, [3, 4]]        # [vel_x, vel_y]
+            agent_features = agent_data[:, [3, 4]]  # [vel_x, vel_y]
 
-        target_features = target_data                     # [pos_x, pos_y]
+        target_features = target_data  # [pos_x, pos_y]
 
         # relative obstacle features [rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y,(acc_x, acc_y)]
-        rel_feats = self._build_relative_obstacle_feats(agent_data, obstacles_data, mask)
+        rel_feats = self._build_relative_obstacle_feats(
+            agent_data, obstacles_data, mask
+        )
 
         # pack valid sequences for LSTM
         lengths = self._lengths_from_mask(mask)
@@ -136,9 +148,13 @@ class LSTMExtractor(BaseFeaturesExtractor):
         per_step = per_step * valid_mask
 
         # flatten obstacle features
-        obstacles_flat = per_step.reshape(agent_data.shape[0], self._obstacles_total_size)
+        obstacles_flat = per_step.reshape(
+            agent_data.shape[0], self._obstacles_total_size
+        )
 
         # concatenate agent, target, and obstacle features
-        features = torch.cat([agent_features, target_features, obstacles_flat], dim=1)
+        features = torch.cat(
+            [agent_features, target_features, obstacles_flat], dim=1
+        )
 
         return self.post(features)
