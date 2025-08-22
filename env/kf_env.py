@@ -130,6 +130,8 @@ class KFEnv(gym.Env):
 
         entity.set_space(self.space)
 
+        return entity
+
     def clear_entities(self) -> None:
         for entity in self._get_entities():
             entity.unset_space()

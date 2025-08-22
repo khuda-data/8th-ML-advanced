@@ -5,12 +5,14 @@ channels:
   - defaults
 dependencies:
   - python=3.12
+  - pytest
 
   - pytorch
   - torchvision
   - torchaudio
 
+  - stable-baselines3
+
   - gymnasium
   - pygame
   - pymunk
-  - stable-baselines3
