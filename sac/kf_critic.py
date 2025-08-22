@@ -1,10 +1,8 @@
-# sac/kf_policy.py
-from typing import Optional, List, Type
+from typing import List, Type
 import torch.nn as nn
 from gymnasium import spaces
-from stable_baselines3.sac.policies import SACPolicy, Actor, Critic
+from stable_baselines3.sac.policies import Critic
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
-from stable_baselines3.common.type_aliases import Schedule
 
 
 class KFCritic(Critic):
