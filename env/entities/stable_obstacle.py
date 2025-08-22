@@ -3,6 +3,7 @@ import random
 from pygame import Vector2
 from .entity import Entity
 from ..types import CollisionType
+import pymunk
 
 
 class StableObstacle(Entity):
@@ -26,23 +27,19 @@ class StableObstacle(Entity):
             collision_type=CollisionType.OBSTACLE,
         )
 
+        self.shape.elasticity = 1.0
+        self.shape.friction = 0.0
+
+        WALL_CAT     = 0b0001
+        OBSTACLE_CAT = 0b0010
+        AGENT_CAT    = 0b0100
+        self.shape.filter = pymunk.ShapeFilter(
+            categories=OBSTACLE_CAT,
+            mask=WALL_CAT | AGENT_CAT | OBSTACLE_CAT
+        )
+
     def update(self, dt: float):
         super().update(dt)
-
-        # Ensure velocity remains constant (in case of physics interference)
-        current_velocity = self.get_velocity()
-        current_speed = np.sqrt(current_velocity.x**2 + current_velocity.y**2)
-
-        if (
-            abs(current_speed - self.speed) > 0.01
-        ):  # Small tolerance for floating point
-            if current_speed > 0:
-                scale = self.speed / current_speed
-                self.set_velocity(
-                    Vector2(
-                        current_velocity.x * scale, current_velocity.y * scale
-                    )
-                )
 
     def reset(self):
         super().reset()

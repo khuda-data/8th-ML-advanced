@@ -10,6 +10,12 @@ from .types import CollisionType
 from .entities import Agent, Entity, StableObstacle
 
 
+# 카테고리 비트 정의(파일 상단 아무 곳 또는 모듈 상수로)
+WALL_CAT      = 0b0001
+OBSTACLE_CAT  = 0b0010
+AGENT_CAT     = 0b0100
+
+
 class KFEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 60}
 
@@ -61,6 +67,8 @@ class KFEnv(gym.Env):
 
         self.space = pymunk.Space()
         self.space.gravity = (0, 0)
+        
+        self._create_walls()
 
         self.agent: Optional[Agent] = None
         self.obstacles: List[Entity] = []
@@ -80,6 +88,18 @@ class KFEnv(gym.Env):
             begin=self._on_agent_collision,
         )
 
+        self.space.on_collision(
+            CollisionType.OBSTACLE, 
+            CollisionType.OBSTACLE,
+            begin=self._on_obstacle_collision
+        )
+
+        self.space.on_collision(
+            CollisionType.OBSTACLE, 
+            CollisionType.WALL,
+            begin=self._on_obstacle_wall_begin
+        )
+
         self.reset()
 
     def _get_entities(self) -> List[Entity]:
@@ -91,6 +111,12 @@ class KFEnv(gym.Env):
 
     def _on_agent_collision(self, arbiter, space, data):
         self.collision_occurred = True
+        return True
+    
+    def _on_obstacle_collision(self, arbiter, space, data):
+        return True
+    
+    def _on_obstacle_wall_begin(self, arbiter, space, data):
         return True
 
     def add_agent(self, agent_class: Type[Agent] = Agent, **kwargs) -> Agent:
@@ -340,6 +366,35 @@ class KFEnv(gym.Env):
             if distance < min_distance:
                 return False
         return True
+    
+    def _create_walls(self) -> None:
+        """환경의 경계에 정적인(움직이지 않는) 벽을 생성합니다."""
+        half_size = self.world_size / 2
+        # Pymunk 공간에는 기본적으로 움직이지 않는 '정적 바디'가 있습니다.
+        # 모든 정적 객체는 이 바디에 연결하는 것이 효율적입니다.
+        static_body = self.space.static_body
+        
+        # 4개의 벽(선분)을 정의합니다. (시작점, 끝점, 두께)
+        walls = [
+            # 아래쪽 벽 ((-10, -10) -> (10, -10))
+            pymunk.Segment(static_body, (-half_size, -half_size), (half_size, -half_size), 0.1),
+            # 위쪽 벽 ((-10, 10) -> (10, 10))
+            pymunk.Segment(static_body, (-half_size, half_size), (half_size, half_size), 0.1),
+            # 왼쪽 벽 ((-10, -10) -> (-10, 10))
+            pymunk.Segment(static_body, (-half_size, -half_size), (-half_size, half_size), 0.1),
+            # 오른쪽 벽 ((10, -10) -> (10, 10))
+            pymunk.Segment(static_body, (half_size, -half_size), (half_size, half_size), 0.1)
+        ]
+
+        for wall in walls:
+            wall.elasticity = 1.0  # 완벽한 탄성 충돌
+            wall.friction = 0.0   # 마찰 없음
+            wall.collision_type = CollisionType.WALL  # 위에서 정의한 WALL 유형을 할당
+
+            wall.filter = pymunk.ShapeFilter(categories=WALL_CAT, mask=OBSTACLE_CAT)
+        
+        # 생성한 벽들을 물리 공간에 추가합니다.
+        self.space.add(*walls)
 
     def close(self) -> None:
         pygame.quit()

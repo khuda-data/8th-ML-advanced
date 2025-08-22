@@ -30,6 +30,8 @@ class Entity:
         self.shape.friction = 0.7
         self.shape.collision_type = collision_type
 
+        self.shape.entity = self
+
         self.reset()
 
     def set_space(self, space: pymunk.Space) -> None:
@@ -83,7 +85,6 @@ class Entity:
 
     def update(self, dt: float):
         current_velocity = self.get_velocity()
-
         # Calculate acceleration based on velocity change
         self.acceleration = Vector2(
             (

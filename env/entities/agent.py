@@ -26,6 +26,13 @@ class Agent(Entity):
         self.max_force = max_force
         self.max_velocity = 10.0
 
+        OBSTACLE_CAT = 0b0010
+        AGENT_CAT    = 0b0100
+        self.shape.filter = pymunk.ShapeFilter(
+            categories=AGENT_CAT,
+            mask=OBSTACLE_CAT | AGENT_CAT  # 벽 비트 제외
+        )
+
     def apply_acceleration(self, acceleration: Vector2):
         force_x = self.body.mass * acceleration.x
         force_y = self.body.mass * acceleration.y
