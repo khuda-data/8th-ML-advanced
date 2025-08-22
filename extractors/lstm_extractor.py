@@ -26,7 +26,7 @@ class LSTMExtractor(BaseFeaturesExtractor):
     def __init__(
         self,
         observation_space: spaces.Dict,
-        features_dim: int = 256,     # Same as padding_extractor
+        features_dim: int = 256,
         lstm_hidden: int = 128,
         lstm_layers: int = 1,
         bidirectional: bool = False,
