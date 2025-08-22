@@ -7,43 +7,46 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 class LSTMExtractor(BaseFeaturesExtractor):
     """
-    Converts multi-input observations into feature vectors using an LSTM-based extractor.
+    LSTM-based feature extractor compatible with SB3.
+    Input keys and semantics follow padding_extractor.py:
+      - observations["agent"]: [batch_size, 7] - [radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y]
+      - observations["obstacles"]: [batch_size, max_obstacles, 7] - each obstacle [radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y]
+      - observations["target"]: [batch_size, 2] - [pos_x, pos_y]
+      - observations["mask"]: [batch_size, max_obstacles] - 1 if obstacle valid, else 0
 
-    Expected input (each tensor has a batch dimension [B] added by SB3):
-      - observation["agent"]     : [B, A]            - [vel_x, vel_y] or [vel_x, vel_y, acc_x, acc_y]
-      - observation["target"]    : [B, T]            - [pos_x, pos_y]
-      - observation["obstacles"] : [B, N, F]         - [rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y, acc_x, acc_y]
-      - observation["mask"]      : [B, N]            - [valid_obstacle_1, ..., valid_obstacle_N]
+    Internally computes relative obstacle features (agent-centered):
+      - without acceleration: [rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y]
+      - with acceleration: [rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y, acc_x, acc_y]
+
+    Output shape matches padding_extractor.py:
+      [batch_size, agent_features + target_features + max_obstacles * obstacle_feature_size]
     """
 
     def __init__(
         self,
         observation_space: spaces.Dict,
-        features_dim: int = 256,
+        *,
+        max_obstacles: int = 10,
+        include_acceleration: bool = False,
         lstm_hidden: int = 128,
         lstm_layers: int = 1,
         bidirectional: bool = False,
         use_layernorm: bool = True,
     ) -> None:
-        super().__init__(observation_space, features_dim)
+        # same feature sizing rules as padding_extractor
+        self.max_obstacles = max_obstacles
+        self.include_acceleration = include_acceleration
+        self._agent_size = 4 if include_acceleration else 2   # [vel_x, vel_y] or [vel_x, vel_y, acc_x, acc_y]
+        self._target_size = 2                                 # [pos_x, pos_y]
+        self._obstacle_size = 6 if include_acceleration else 4
+        self._obstacles_total_size = self._obstacle_size * max_obstacles
+        out_dim = self._agent_size + self._target_size + self._obstacles_total_size
 
-        agent_dim  = int(observation_space["agent"].shape[-1])  # [vel_x, vel_y] or [vel_x, vel_y, acc_x, acc_y]
-        target_dim = int(observation_space["target"].shape[-1])  # [pos_x, pos_y]
+        super().__init__(observation_space, out_dim)
 
-        # obstacles: [N, F]
-        obs_space: spaces.Box = observation_space["obstacles"]
-        assert len(obs_space.shape) == 2, "obstacles must have shape (N, F)"
-        self.max_obstacles = int(obs_space.shape[0])   # N
-        obs_feat_dim       = int(obs_space.shape[1])   # F
-
-        # mask: [N]
-        mask_space: spaces.Box = observation_space["mask"]
-        assert len(mask_space.shape) == 1 and int(mask_space.shape[0]) == self.max_obstacles, \
-            "mask must have shape (N,) and match obstacles' first dim"
-
-        self.bidirectional = bidirectional
+        # LSTM processes per-obstacle relative features [rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y, (acc_x, acc_y)]
         self.lstm = nn.LSTM(
-            input_size=obs_feat_dim,
+            input_size=self._obstacle_size,
             hidden_size=lstm_hidden,
             num_layers=lstm_layers,
             batch_first=True,
@@ -51,54 +54,91 @@ class LSTMExtractor(BaseFeaturesExtractor):
         )
         lstm_out_dim = lstm_hidden * (2 if bidirectional else 1)
 
-        # Combine Agent/Target with LSTM output and project to final features_dim
-        fusion_in = agent_dim + target_dim + lstm_out_dim  # [A + T + H]
-        layers = [nn.Linear(fusion_in, features_dim)]
-        if use_layernorm:
-            layers.append(nn.LayerNorm(features_dim))
-        layers.append(nn.ReLU())
-        self.proj = nn.Sequential(*layers)
+        # Project LSTM output back to per-obstacle feature size to maintain compatibility
+        self.per_step_head = nn.Linear(lstm_out_dim, self._obstacle_size)
 
-        self.features_dim = features_dim
+        # Optional post-processing normalization
+        self.post = nn.LayerNorm(out_dim) if use_layernorm else nn.Identity()
+        self.features_dim = out_dim
 
     @torch.no_grad()
     def _lengths_from_mask(self, mask: torch.Tensor) -> torch.Tensor:
         """
-        Derives sequence lengths from mask ∈ {0,1}, shape [B, N].
-        Clamps minimum length to 1 to avoid empty sequences.
+        Compute valid sequence lengths from mask [batch_size, max_obstacles].
+        Ensures minimum length of 1 to avoid empty sequence issues.
         """
         if mask.dtype.is_floating_point:
-            lengths = (mask > 0.5).sum(dim=1)  # [B]
+            lengths = (mask > 0.5).sum(dim=1)
         else:
-            lengths = mask.long().sum(dim=1)  # [B]
+            lengths = mask.long().sum(dim=1)
         return lengths.clamp(min=1)
 
-    def forward(self, obs: Dict[str, torch.Tensor]) -> torch.Tensor:
+    def _build_relative_obstacle_feats(
+        self,
+        agent_data: torch.Tensor,       # [batch_size, 7] - [radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y]
+        obstacles_data: torch.Tensor,   # [batch_size, max_obstacles, 7]
+        mask: torch.Tensor,             # [batch_size, max_obstacles]
+    ) -> torch.Tensor:
         """
-        Generates feature vectors from the observation dictionary, returning [B, features_dim].
+        Compute per-obstacle relative features with respect to agent.
+        Returns [batch_size, max_obstacles, obstacle_feature_size], masked where invalid.
         """
-        agent      = obs["agent"]        # [B, A] - [vel_x, vel_y] or [vel_x, vel_y, acc_x, acc_y]
-        target     = obs["target"]       # [B, T] - [pos_x, pos_y]
-        obstacles  = obs["obstacles"]    # [B, N, F] - [rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y, acc_x, acc_y]
-        mask       = obs["mask"]         # [B, N] - [valid_obstacle_1, ..., valid_obstacle_N]
+        agent_pos = agent_data[:, [1, 2]].unsqueeze(1)   # [pos_x, pos_y]
+        agent_vel = agent_data[:, [3, 4]].unsqueeze(1)   # [vel_x, vel_y]
+        obs_pos = obstacles_data[:, :, [1, 2]]           # [pos_x, pos_y]
+        obs_vel = obstacles_data[:, :, [3, 4]]           # [vel_x, vel_y]
 
-        B, N, F = obstacles.shape  # Batch size, max obstacles, obstacle features
+        rel_pos = obs_pos - agent_pos                    # [rel_pos_x, rel_pos_y]
+        rel_vel = obs_vel - agent_vel                    # [rel_vel_x, rel_vel_y]
 
-        # Handle variable-length sequences using pack_padded_sequence
-        lengths = self._lengths_from_mask(mask)                        # [B]
-        packed = nn.utils.rnn.pack_padded_sequence(
-            obstacles, lengths.cpu(), batch_first=True, enforce_sorted=False
-        )
-        packed_out, (h_n, c_n) = self.lstm(packed)
-
-        # Select the last hidden state from the final LSTM layer
-        if self.bidirectional:
-            fwd_last = h_n[-2]  # [B, H]
-            bwd_last = h_n[-1]  # [B, H]
-            lstm_feat = torch.cat([fwd_last, bwd_last], dim=1)  # [B, 2H]
+        if self.include_acceleration:
+            obs_acc = obstacles_data[:, :, [5, 6]]       # [acc_x, acc_y]
+            feats = torch.cat([rel_pos, rel_vel, obs_acc], dim=-1)
         else:
-            lstm_feat = h_n[-1]  # [B, H]
+            feats = torch.cat([rel_pos, rel_vel], dim=-1)
 
-        fused = torch.cat([agent, target, lstm_feat], dim=1)  # [B, A+T+H]
-        features = self.proj(fused)                           # [B, features_dim]
-        return features
+        valid_mask = (mask > 0.5).float().unsqueeze(-1)
+        return feats * valid_mask
+
+    def forward(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:
+        """
+        Forward pass returning [batch_size, features_dim].
+        """
+        agent_data = observations["agent"]         # [radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y]
+        obstacles_data = observations["obstacles"] # [radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y] per obstacle
+        target_data = observations["target"]       # [pos_x, pos_y]
+        mask = observations["mask"]                # obstacle validity mask
+
+        # agent velocity (+acceleration if enabled)
+        if self.include_acceleration:
+            agent_features = agent_data[:, [3, 4, 5, 6]]  # [vel_x, vel_y, acc_x, acc_y]
+        else:
+            agent_features = agent_data[:, [3, 4]]        # [vel_x, vel_y]
+
+        target_features = target_data                     # [pos_x, pos_y]
+
+        # relative obstacle features [rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y,(acc_x, acc_y)]
+        rel_feats = self._build_relative_obstacle_feats(agent_data, obstacles_data, mask)
+
+        # pack valid sequences for LSTM
+        lengths = self._lengths_from_mask(mask)
+        packed = nn.utils.rnn.pack_padded_sequence(
+            rel_feats, lengths.cpu(), batch_first=True, enforce_sorted=False
+        )
+        packed_out, _ = self.lstm(packed)
+        lstm_out, _ = nn.utils.rnn.pad_packed_sequence(
+            packed_out, batch_first=True, total_length=self.max_obstacles
+        )
+
+        # project each obstacle timestep back to obstacle_feature_size
+        per_step = self.per_step_head(lstm_out)
+        valid_mask = (mask > 0.5).float().unsqueeze(-1)
+        per_step = per_step * valid_mask
+
+        # flatten obstacle features
+        obstacles_flat = per_step.reshape(agent_data.shape[0], self._obstacles_total_size)
+
+        # concatenate agent, target, and obstacle features
+        features = torch.cat([agent_features, target_features, obstacles_flat], dim=1)
+
+        return self.post(features)
