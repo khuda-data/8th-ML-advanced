@@ -68,15 +68,17 @@ class KFEnv(gym.Env):
 
         self.collision_occurred = False
 
-        handler = self.space.add_collision_handler(
-            CollisionType.AGENT, CollisionType.OBSTACLE
+        self.space.on_collision(
+            CollisionType.AGENT,
+            CollisionType.OBSTACLE,
+            begin=self._on_agent_collision,
         )
-        handler.begin = self._on_agent_collision
 
-        handler2 = self.space.add_collision_handler(
-            CollisionType.AGENT, CollisionType.ENTITY
+        self.space.on_collision(
+            CollisionType.AGENT,
+            CollisionType.ENTITY,
+            begin=self._on_agent_collision,
         )
-        handler2.begin = self._on_agent_collision
 
         self.reset()
 
