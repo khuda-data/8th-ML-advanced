@@ -6,34 +6,6 @@ import torch.nn as nn
 env = KFEnv()
 
 model = SAC(
-    policy=KFSACPolicy,
-    env=env,
-    learning_rate=3e-4,
-    buffer_size=1_000_000,
-    batch_size=256,
-    tau=0.005,
-    gamma=0.99,
-    learning_starts=5_000,
-    ent_coef="auto",
-    policy_kwargs=dict(
-        net_arch=[256, 256],
-        activation_fn=nn.ReLU,
-        log_std_init=-3.0,
-    ),
-    device="auto",
-    verbose=1,
-)
-
-model.learn(total_timesteps=300_000)
-
-from env.kf_env import KFEnv
-from sac.kf_policy import KFSACPolicy
-from stable_baselines3 import SAC
-import torch.nn as nn
-
-env = KFEnv()
-
-model = SAC(
     policy=KFSACPolicy,    # 사용할 정책 클래스 
     env=env,               # 학습할 환경 
 
