@@ -1,33 +1,40 @@
-import torch
+from typing import Optional, List, Type
 import torch.nn as nn
-from torch.distributions.normal import Normal
+from gymnasium import spaces
+from stable_baselines3.sac.policies import Actor
+from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
+from stable_baselines3.common.type_aliases import Schedule
 
-state_size = 36
-action_size = 2
 
-
-class ActorNetwork(nn.Module):
-    def __init__(self, layer_size=128):
-        super(ActorNetwork, self).__init__()
-
-        self.policy_layers = nn.Sequential(
-            nn.Linear(state_size, layer_size),
-            nn.ReLU(),
-            nn.Linear(layer_size, layer_size),
-            nn.ReLU(),
+class KFActor(Actor):
+    def __init__(
+        self,
+        observation_space: spaces.Space,
+        action_space: spaces.Space,
+        features_extractor: BaseFeaturesExtractor,
+        features_dim: int,
+        net_arch: List[int],
+        activation_fn: Type[nn.Module] = nn.ReLU,
+        use_sde: bool = False,
+        log_std_init: float = -3.0,
+        full_std: bool = True,
+        sde_net_arch: Optional[List[int]] = None,
+        use_expln: bool = False,
+        squash_output: bool = True,
+        lr_schedule: Optional[Schedule] = None,
+    ):
+        super().__init__(
+            observation_space=observation_space,
+            action_space=action_space,
+            features_extractor=features_extractor,
+            features_dim=features_dim,
+            net_arch=net_arch,
+            activation_fn=activation_fn,
+            use_sde=use_sde,
+            log_std_init=log_std_init,
+            full_std=full_std,
+            sde_net_arch=sde_net_arch,
+            use_expln=use_expln,
+            squash_output=squash_output,
+            lr_schedule=lr_schedule,
         )
-
-        self.actor_mean = nn.Linear(layer_size, action_size)
-        self.actor_log_std = nn.Parameter(torch.zeros(1, action_size))
-
-    def forward(self, state):
-        features = self.policy_layers(state)
-
-        action_mean = self.actor_mean(features)
-
-        action_log_std = self.actor_log_std.expand_as(action_mean)
-        action_std = torch.exp(action_log_std)
-
-        policy_dist = Normal(action_mean, action_std)
-
-        return policy_dist
