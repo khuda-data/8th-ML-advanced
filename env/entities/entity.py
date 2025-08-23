@@ -4,6 +4,7 @@ from pygame import Vector2
 from typing import Tuple, Optional
 from ..types import CollisionType
 
+
 class Entity:
     """Base entity class with physics body. 1 unit = 1 meter."""
 
@@ -29,7 +30,8 @@ class Entity:
         self.shape.friction = 0.7
         self.shape.collision_type = collision_type
 
-        self.shape.entity = self
+        self.shape.elasticity = 1.0
+        self.shape.friction = 0.0
 
         self.reset()
 
@@ -70,9 +72,7 @@ class Entity:
         """Apply impulse to entity"""
         self.body.apply_impulse_at_local_point((impulse.x, impulse.y), (0, 0))
 
-    def render(
-        self, screen: pygame.Surface, scale: float, offset: float
-    ) -> None:
+    def render(self, screen: pygame.Surface, scale: float, offset: float) -> None:
         """Render entity on pygame screen with scaling and offset"""
         pos = self.get_position()
         screen_x = int(pos.x * scale + offset)
@@ -86,16 +86,8 @@ class Entity:
         current_velocity = self.get_velocity()
         # Calculate acceleration based on velocity change
         self.acceleration = Vector2(
-            (
-                (current_velocity.x - self.previous_velocity.x) / dt
-                if dt > 0
-                else 0
-            ),
-            (
-                (current_velocity.y - self.previous_velocity.y) / dt
-                if dt > 0
-                else 0
-            ),
+            ((current_velocity.x - self.previous_velocity.x) / dt if dt > 0 else 0),
+            ((current_velocity.y - self.previous_velocity.y) / dt if dt > 0 else 0),
         )
 
         self.previous_velocity = current_velocity

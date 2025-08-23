@@ -6,8 +6,9 @@ import pymunk
 import numpy as np
 from typing import List, Optional, Tuple, Dict, Any, Type
 
-from .types import CollisionType
+from .types import CollisionType, EntityType
 from .entities import Agent, Entity, StableObstacle
+
 
 class KFEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 60}
@@ -21,14 +22,14 @@ class KFEnv(gym.Env):
     ) -> None:
         super().__init__()
 
+        # self.elapsed_steps = 0
+
         self.render_mode = render_mode
         self.world_size = world_size
         self.max_obstacles = max_obstacles
         self.target_radius = target_radius
 
-        self.action_space = spaces.Box(
-            low=-1.0, high=1.0, shape=(2,), dtype=np.float32
-        )
+        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
 
         # Each entity: [radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y] = 7 dimensions
         self.observation_space = spaces.Dict(
@@ -53,14 +54,12 @@ class KFEnv(gym.Env):
 
         pygame.init()
         self.screen_size = 800
-        self.screen = pygame.display.set_mode(
-            (self.screen_size, self.screen_size)
-        )
+        self.screen = pygame.display.set_mode((self.screen_size, self.screen_size))
         self.clock = pygame.time.Clock()
 
         self.space = pymunk.Space()
         self.space.gravity = (0, 0)
-        
+
         self._create_walls()
 
         self.agent: Optional[Agent] = None
@@ -82,18 +81,16 @@ class KFEnv(gym.Env):
         )
 
         self.space.on_collision(
-            CollisionType.AGENT, 
-            CollisionType.WALL,
-            begin=self._on_agent_collision
+            CollisionType.AGENT, CollisionType.WALL, begin=self._on_agent_collision
         )
 
         self.space.on_collision(
-            CollisionType.OBSTACLE, 
+            CollisionType.OBSTACLE,
             CollisionType.OBSTACLE,
         )
 
         self.space.on_collision(
-            CollisionType.OBSTACLE, 
+            CollisionType.OBSTACLE,
             CollisionType.WALL,
         )
 
@@ -121,25 +118,19 @@ class KFEnv(gym.Env):
         self, obstacle_class: Type[Entity] = StableObstacle, **kwargs
     ) -> Entity:
         if len(self.obstacles) >= self.max_obstacles:
-            raise ValueError(
-                f"Cannot add more than {self.max_obstacles} obstacles"
-            )
+            raise ValueError(f"Cannot add more than {self.max_obstacles} obstacles")
 
         obstacle = self._add_entity(obstacle_class, **kwargs)
         self.obstacles.append(obstacle)
         return obstacle
 
-    def _add_entity(
-        self, entity_class: Type[Entity] = Entity, **kwargs
-    ) -> Entity:
+    def _add_entity(self, entity_class: Type[Entity] = Entity, **kwargs) -> Entity:
         entity = entity_class(**kwargs)
 
         unsafe_areas = []
         for other_entity in self._get_entities():
             if other_entity != entity:
-                unsafe_areas.append(
-                    (other_entity.get_position(), other_entity.radius)
-                )
+                unsafe_areas.append((other_entity.get_position(), other_entity.radius))
 
         self._reset_entity(
             entity, self._find_safe_position(entity.radius, unsafe_areas)
@@ -162,13 +153,12 @@ class KFEnv(gym.Env):
         super().reset(seed=seed)
 
         self.collision_occurred = False
+        # self.elapsed_steps = 0
 
         unsafe_areas = []
 
         for entity in self._get_entities():
-            safe_position = self._find_safe_position(
-                entity.radius, unsafe_areas
-            )
+            safe_position = self._find_safe_position(entity.radius, unsafe_areas)
             self._reset_entity(entity, safe_position)
             unsafe_areas.append((safe_position, entity.radius))
 
@@ -183,6 +173,8 @@ class KFEnv(gym.Env):
 
         if self.agent is not None:
             self.agent.apply_action(action)
+
+        # self.elapsed_steps += 1
 
         # Update physics
         dt = 1.0 / self.metadata["render_fps"]
@@ -259,6 +251,7 @@ class KFEnv(gym.Env):
         obstacles_obs = np.zeros((self.max_obstacles, 7), dtype=np.float32)
         mask = np.zeros(self.max_obstacles, dtype=np.float32)
 
+        # for i, obstacle in enumerate(np.random.shuffle(self.obstacles)):
         for i, obstacle in enumerate(self.obstacles):
             if i >= self.max_obstacles:
                 break
@@ -302,9 +295,16 @@ class KFEnv(gym.Env):
         reward = -distance_to_target * 0.1
 
         if self._check_target_reached():
-            reward += 100.0
+            reward += 100.0  # - self._get_time_penalty()
+        # elif not self._check_target_reached() and self.collision_occurred:
+        #     reward += -30.0 - self._get_time_penalty()
 
         return reward
+
+    # def _get_time_penalty(self) -> float:
+    #     alpha = 10 # 초당 감소량
+    #     dt = 1.0 / self.metadata["render_fps"]
+    #     return alpha * self.elapsed_steps * dt
 
     def _check_target_reached(self) -> bool:
         if not self.agent:
@@ -357,31 +357,43 @@ class KFEnv(gym.Env):
             if distance < min_distance:
                 return False
         return True
-    
+
     def _create_walls(self) -> None:
         """환경의 경계에 정적인(움직이지 않는) 벽을 생성합니다."""
         half_size = self.world_size / 2
         # Pymunk 공간에는 기본적으로 움직이지 않는 '정적 바디'가 있습니다.
         # 모든 정적 객체는 이 바디에 연결하는 것이 효율적입니다.
         static_body = self.space.static_body
-        
+
         # 4개의 벽(선분)을 정의합니다. (시작점, 끝점, 두께)
         walls = [
             # 아래쪽 벽 ((-10, -10) -> (10, -10))
-            pymunk.Segment(static_body, (-half_size, -half_size), (half_size, -half_size), 0.1),
+            pymunk.Segment(
+                static_body, (-half_size, -half_size), (half_size, -half_size), 0.1
+            ),
             # 위쪽 벽 ((-10, 10) -> (10, 10))
-            pymunk.Segment(static_body, (-half_size, half_size), (half_size, half_size), 0.1),
+            pymunk.Segment(
+                static_body, (-half_size, half_size), (half_size, half_size), 0.1
+            ),
             # 왼쪽 벽 ((-10, -10) -> (-10, 10))
-            pymunk.Segment(static_body, (-half_size, -half_size), (-half_size, half_size), 0.1),
+            pymunk.Segment(
+                static_body, (-half_size, -half_size), (-half_size, half_size), 0.1
+            ),
             # 오른쪽 벽 ((10, -10) -> (10, 10))
-            pymunk.Segment(static_body, (half_size, -half_size), (half_size, half_size), 0.1)
+            pymunk.Segment(
+                static_body, (half_size, -half_size), (half_size, half_size), 0.1
+            ),
         ]
 
         for wall in walls:
             wall.elasticity = 1.0  # 완벽한 탄성 충돌
-            wall.friction = 0.0   # 마찰 없음
+            wall.friction = 0.0  # 마찰 없음
             wall.collision_type = CollisionType.WALL  # 위에서 정의한 WALL 유형을 할당
-        
+
+            wall.filter = pymunk.ShapeFilter(
+                categories=EntityType.WALL, mask=EntityType.OBSTACLE
+            )
+
         # 생성한 벽들을 물리 공간에 추가합니다.
         self.space.add(*walls)
 
