@@ -1,9 +1,7 @@
-import pymunk
 import numpy as np
 from pygame import Vector2
 from .entity import Entity
 from ..types import CollisionType
-
 
 class Agent(Entity):
     """Agent class that moves based on external acceleration input"""
@@ -25,13 +23,6 @@ class Agent(Entity):
         self.max_acceleration = max_acceleration
         self.max_force = max_force
         self.max_velocity = 10.0
-
-        OBSTACLE_CAT = 0b0010
-        AGENT_CAT    = 0b0100
-        self.shape.filter = pymunk.ShapeFilter(
-            categories=AGENT_CAT,
-            mask=OBSTACLE_CAT | AGENT_CAT  # 벽 비트 제외
-        )
 
     def apply_acceleration(self, acceleration: Vector2):
         force_x = self.body.mass * acceleration.x

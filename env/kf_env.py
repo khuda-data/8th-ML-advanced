@@ -9,13 +9,6 @@ from typing import List, Optional, Tuple, Dict, Any, Type
 from .types import CollisionType
 from .entities import Agent, Entity, StableObstacle
 
-
-# 카테고리 비트 정의(파일 상단 아무 곳 또는 모듈 상수로)
-WALL_CAT      = 0b0001
-OBSTACLE_CAT  = 0b0010
-AGENT_CAT     = 0b0100
-
-
 class KFEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 60}
 
@@ -89,15 +82,19 @@ class KFEnv(gym.Env):
         )
 
         self.space.on_collision(
+            CollisionType.AGENT, 
+            CollisionType.WALL,
+            begin=self._on_agent_collision
+        )
+
+        self.space.on_collision(
             CollisionType.OBSTACLE, 
             CollisionType.OBSTACLE,
-            begin=self._on_obstacle_collision
         )
 
         self.space.on_collision(
             CollisionType.OBSTACLE, 
             CollisionType.WALL,
-            begin=self._on_obstacle_wall_begin
         )
 
         self.reset()
@@ -111,12 +108,6 @@ class KFEnv(gym.Env):
 
     def _on_agent_collision(self, arbiter, space, data):
         self.collision_occurred = True
-        return True
-    
-    def _on_obstacle_collision(self, arbiter, space, data):
-        return True
-    
-    def _on_obstacle_wall_begin(self, arbiter, space, data):
         return True
 
     def add_agent(self, agent_class: Type[Agent] = Agent, **kwargs) -> Agent:
@@ -390,8 +381,6 @@ class KFEnv(gym.Env):
             wall.elasticity = 1.0  # 완벽한 탄성 충돌
             wall.friction = 0.0   # 마찰 없음
             wall.collision_type = CollisionType.WALL  # 위에서 정의한 WALL 유형을 할당
-
-            wall.filter = pymunk.ShapeFilter(categories=WALL_CAT, mask=OBSTACLE_CAT)
         
         # 생성한 벽들을 물리 공간에 추가합니다.
         self.space.add(*walls)

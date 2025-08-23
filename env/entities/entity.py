@@ -4,7 +4,6 @@ from pygame import Vector2
 from typing import Tuple, Optional
 from ..types import CollisionType
 
-
 class Entity:
     """Base entity class with physics body. 1 unit = 1 meter."""
 

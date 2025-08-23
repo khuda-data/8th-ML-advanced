@@ -3,8 +3,6 @@ import random
 from pygame import Vector2
 from .entity import Entity
 from ..types import CollisionType
-import pymunk
-
 
 class StableObstacle(Entity):
     """Obstacle that moves in a constant direction with constant speed"""
@@ -29,17 +27,6 @@ class StableObstacle(Entity):
 
         self.shape.elasticity = 1.0
         self.shape.friction = 0.0
-
-        WALL_CAT     = 0b0001
-        OBSTACLE_CAT = 0b0010
-        AGENT_CAT    = 0b0100
-        self.shape.filter = pymunk.ShapeFilter(
-            categories=OBSTACLE_CAT,
-            mask=WALL_CAT | AGENT_CAT | OBSTACLE_CAT
-        )
-
-    def update(self, dt: float):
-        super().update(dt)
 
     def reset(self):
         super().reset()
