@@ -1,4 +1,4 @@
-from enum import IntEnum
+from enum import IntEnum, Enum
 
 
 class CollisionType(IntEnum):
@@ -8,7 +8,9 @@ class CollisionType(IntEnum):
     WALL = 4
 
 
-class EntityType(IntEnum):
-    WALL = 1 << 0  # 0b0001
-    OBSTACLE = 1 << 1  # 0b0010
-    AGENT = 1 << 2  # 0b0100
+class RewardType(float, Enum):
+    DISTANCE_ALPHA = 0.1
+    TIME_ALPHA = 0.1
+    TARGET_REACHED = 100.0
+    COLLISION_OCCURRED = 30.0
+    TARGET_DESTROYED = 30.0

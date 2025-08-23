@@ -2,7 +2,7 @@ import numpy as np
 import random
 from pygame import Vector2
 from .entity import Entity
-from ..types import CollisionType, EntityType
+from ..types import CollisionType
 import pymunk
 
 
@@ -25,11 +25,6 @@ class StableObstacle(Entity):
             mass=mass,
             color=(255, 100, 100),
             collision_type=CollisionType.OBSTACLE,
-        )
-
-        self.shape.filter = pymunk.ShapeFilter(
-            categories=EntityType.OBSTACLE,
-            mask=EntityType.WALL | EntityType.AGENT | EntityType.OBSTACLE,
         )
 
     def update(self, dt: float):

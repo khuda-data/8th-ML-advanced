@@ -72,11 +72,17 @@ class Entity:
         """Apply impulse to entity"""
         self.body.apply_impulse_at_local_point((impulse.x, impulse.y), (0, 0))
 
-    def render(self, screen: pygame.Surface, scale: float, offset: float) -> None:
+    def render(
+        self, screen: pygame.Surface, scale: float, offset: float
+    ) -> None:
         """Render entity on pygame screen with scaling and offset"""
         pos = self.get_position()
-        screen_x = int(pos.x * scale + offset)
-        screen_y = int(pos.y * scale + offset)
+
+        screen_pos = pos * scale + offset
+
+        screen_x = int(screen_pos.x)
+        screen_y = int(screen_pos.y)
+
         radius = int(self.radius * scale)
 
         pygame.draw.circle(screen, self.color, (screen_x, screen_y), radius)
@@ -86,8 +92,16 @@ class Entity:
         current_velocity = self.get_velocity()
         # Calculate acceleration based on velocity change
         self.acceleration = Vector2(
-            ((current_velocity.x - self.previous_velocity.x) / dt if dt > 0 else 0),
-            ((current_velocity.y - self.previous_velocity.y) / dt if dt > 0 else 0),
+            (
+                (current_velocity.x - self.previous_velocity.x) / dt
+                if dt > 0
+                else 0
+            ),
+            (
+                (current_velocity.y - self.previous_velocity.y) / dt
+                if dt > 0
+                else 0
+            ),
         )
 
         self.previous_velocity = current_velocity

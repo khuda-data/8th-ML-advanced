@@ -2,7 +2,7 @@ import pymunk
 import numpy as np
 from pygame import Vector2
 from .entity import Entity
-from ..types import CollisionType, EntityType
+from ..types import CollisionType
 
 
 class Agent(Entity):
@@ -25,11 +25,6 @@ class Agent(Entity):
         self.max_acceleration = max_acceleration
         self.max_force = max_force
         self.max_velocity = 10.0
-
-        self.shape.filter = pymunk.ShapeFilter(
-            categories=EntityType.AGENT,
-            mask=EntityType.OBSTACLE | EntityType.AGENT,  # 벽 비트 제외
-        )
 
     def apply_acceleration(self, acceleration: Vector2):
         force_x = self.body.mass * acceleration.x
@@ -54,7 +49,6 @@ class Agent(Entity):
     def update(self, dt: float):
         super().update(dt)
 
-        # Then apply velocity constraints
         velocity = self.get_velocity()
         speed = np.sqrt(velocity.x**2 + velocity.y**2)
 
