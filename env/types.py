@@ -10,7 +10,7 @@ class CollisionType(IntEnum):
 
 class RewardType(float, Enum):
     DISTANCE_ALPHA = 0.1
-    TIME_ALPHA = 0.1
+    TIME_ALPHA = 5
     TARGET_REACHED = 100.0
     COLLISION_OCCURRED = 30.0
     TARGET_DESTROYED = 30.0

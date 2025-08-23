@@ -325,7 +325,6 @@ class KFEnv(gym.Env):
         mask = np.zeros(self.max_obstacles, dtype=np.float32)
 
         if self.agent:
-            agent_pos = self.agent.get_position()
             obs_idx = 0
             for obstacle in self.obstacles:
                 # 관측 가능한 최대 장애물 수를 넘으면 중단
