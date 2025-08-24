@@ -4,22 +4,18 @@ import pygame
 import numpy as np
 import cv2
 
-# --- [핵심 수정] 프로젝트 루트 디렉토리 경로 설정 변경 ---
-# __file__은 현재 파일의 경로(/.../KHUDAFINDER/cv/visual_test_tracker.py)입니다.
-# os.path.dirname()을 한 번 쓰면 'cv' 폴더 경로가 나오고,
-# 한 번 더 쓰면 우리가 원하는 프로젝트 루트('KHUDAFINDER') 경로가 나옵니다.
+# __file__ 현재 파일의 경로(/.../KHUDAFINDER/cv/visual_test_tracker.py)
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 
-# 이제 프로젝트 루트가 경로에 포함되었으므로, 다른 모듈을 불러올 수 있습니다.
 from env.kf_env import KFEnv
 from env.entities import Agent, Entity
-from cv import YOLOv8Tracker # 'from cv.tracker import ...' 가 아닌 'from .' 으로 시작하면 안됩니다.
+from cv import YOLOv8Tracker 
 from cv.utils.visualizer import draw_tracked_objects
 
 def run_visual_test():
     """
-    CV 모듈의 객체 추적 기능을 시각적으로 테스트하는 메인 함수.
+    CV 모듈의 객체 추적 기능을 시각적으로 테스트하는 메인 함수
     """
     print("CV 모듈 시각적 테스트를 시작합니다...")
     
