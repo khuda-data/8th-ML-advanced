@@ -263,27 +263,25 @@ class TestPaddingExtractor:
         assert args[3] is observations["mask"]
         assert args[4] == 3  # max_obstacles
 
+    # tests/test_padding_extractor.py (gradient_flow 테스트)
     def test_gradient_flow(self):
-        """Test that gradients can flow through the extractor."""
         observation_space = self.create_test_observation_space()
-        extractor = PaddingExtractor(observation_space, max_obstacles=3)
+        extractor = PaddingExtractor(observation_space, features_dim=128)
 
-        observations = self.create_test_observations(
-            batch_size=2, max_obstacles=3
-        )
+        obs = self.create_test_observations(batch_size=2, max_obstacles=10)
+        for k in ("agent", "obstacles", "target"):   # mask 제외
+            obs[k].requires_grad_(True)
 
-        # Enable gradient computation
-        for key in observations:
-            observations[key].requires_grad_(True)
-
-        result = extractor.forward(observations)
-        loss = result.sum()
+        out = extractor.forward(obs)
+        loss = out.sum()
         loss.backward()
 
-        # Check that gradients exist
-        for key in observations:
-            assert observations[key].grad is not None
-            assert not torch.all(observations[key].grad == 0)
+        for k in ("agent", "obstacles", "target"):
+            assert obs[k].grad is not None
+            assert torch.any(obs[k].grad != 0)
+
+        assert any(p.grad is not None for p in extractor.parameters() if p.requires_grad)
+
 
     def test_different_obstacle_counts(self):
         """Test extractor with different numbers of obstacles."""

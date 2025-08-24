@@ -111,7 +111,7 @@ def extract_obstacle_relative_features(
         extract_obstacle_relative_features_vectorized instead.
     """
     batch_size, max_obstacles = obstacles_data.shape[:2]
-    feature_size = 5 if include_acceleration else 4
+    feature_size = 6 if include_acceleration else 4
 
     output = torch.zeros(
         batch_size, max_obstacles, feature_size, device=agent_data.device

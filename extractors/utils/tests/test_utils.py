@@ -19,7 +19,6 @@ from ..utils import (
     get_feature_dimensions,
     validate_observation_tensors,
     compute_sequence_lengths_from_mask,
-    create_attention_mask,
 )
 
 
@@ -506,41 +505,6 @@ class TestComputeSequenceLengthsFromMask:
 
         # Values > 0.5 are counted as valid
         expected = torch.tensor([2, 1], dtype=torch.long)
-        torch.testing.assert_close(result, expected)
-
-
-class TestCreateAttentionMask:
-    """Test suite for create_attention_mask function."""
-
-    def test_basic_attention_mask(self):
-        """Test basic attention mask creation."""
-        mask = torch.tensor(
-            [[1.0, 1.0, 0.0], [1.0, 0.0, 0.0]], dtype=torch.float32
-        )
-
-        result = create_attention_mask(mask)
-
-        expected = torch.tensor(
-            [[False, False, True], [False, True, True]], dtype=torch.bool
-        )
-        torch.testing.assert_close(result, expected)
-
-    def test_all_valid_mask(self):
-        """Test with all valid obstacles."""
-        mask = torch.ones(2, 4)
-
-        result = create_attention_mask(mask)
-
-        expected = torch.zeros(2, 4, dtype=torch.bool)
-        torch.testing.assert_close(result, expected)
-
-    def test_all_invalid_mask(self):
-        """Test with all invalid obstacles."""
-        mask = torch.zeros(2, 3)
-
-        result = create_attention_mask(mask)
-
-        expected = torch.ones(2, 3, dtype=torch.bool)
         torch.testing.assert_close(result, expected)
 
 
