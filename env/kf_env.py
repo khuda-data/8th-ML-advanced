@@ -203,7 +203,7 @@ class KFEnv(gym.Env):
         reward = self._calculate_reward()
         terminated = self.collision_occurred or self._check_target_reached()
         truncated = (
-            self._is_agent_out_destruction_(self.target_position)
+            self._is_out_destruction_(self.target_position)
             or self.elapsed_steps > 5000
         )
 
@@ -215,7 +215,7 @@ class KFEnv(gym.Env):
 
         obstacles_to_adjust: List[Entity] = []
         for obstacle in self.obstacles:
-            if self._is_agent_out_destruction_(obstacle.get_position()):
+            if self._is_out_destruction_(obstacle.get_position()):
                 obstacles_to_adjust.append(obstacle)
 
         for obstacle in obstacles_to_adjust:
@@ -315,7 +315,7 @@ class KFEnv(gym.Env):
                 if obs_idx >= self.max_obstacles:
                     break
 
-                if self._is_agent_in_recognition_(obstacle.get_position()):
+                if self._is_in_recognition_(obstacle.get_position()):
                     obstacles_obs[obs_idx] = self._encode_entity(obstacle)
                     mask[obs_idx] = 1.0
                     obs_idx += 1
@@ -348,7 +348,7 @@ class KFEnv(gym.Env):
             reward += RewardType.TARGET_REACHED
         elif self.collision_occurred:
             reward -= RewardType.COLLISION_OCCURRED
-        elif self._is_agent_out_destruction_(self.target_position):
+        elif self._is_out_destruction_(self.target_position):
             reward -= RewardType.TARGET_DESTROYED
 
         reward -= self._get_time_penalty()
@@ -364,12 +364,12 @@ class KFEnv(gym.Env):
         agent_pos = self.agent.get_position()
         return agent_pos.distance_to(self.target_position) < self.target_radius
 
-    def _is_agent_out_destruction_(self, vector: Vector2):
+    def _is_out_destruction_(self, vector: Vector2):
         agent_pos = self.agent.get_position()
 
         return agent_pos.distance_to(vector) > self.destruction_radius
 
-    def _is_agent_in_recognition_(self, vector: Vector2):
+    def _is_in_recognition_(self, vector: Vector2):
         agent_pos = self.agent.get_position()
 
         return agent_pos.distance_to(vector) < self.recognition_radius
