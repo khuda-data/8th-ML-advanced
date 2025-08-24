@@ -272,7 +272,7 @@ class KFEnv(gym.Env):
 
         pygame.draw.circle(
             self.screen,
-            (0, 255, 0),
+            (0, 0, 255),
             (int(target_screen_pos.x), int(target_screen_pos.y)),
             target_screen_radius,
             3,
