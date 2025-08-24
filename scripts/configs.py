@@ -12,11 +12,11 @@ import torch.nn as nn
 class EnvironmentConfig:
     """Environment-related configuration settings."""
 
-    max_obstacles: int = 10
-    target_radius: float = 10.0
-    recognition_radius: float = 100.0
-    destruction_radius: float = 200.0
-    n_obstacles: int = 5
+    max_obstacles: int = 20
+    target_radius: float = 1.0
+    recognition_radius: float = 10.0
+    destruction_radius: float = 25.0
+    n_obstacles: int = 20
     render_mode: Optional[str] = None  # None, "human", "rgb_array"
 
 
@@ -28,8 +28,7 @@ class FeatureExtractorConfig:
     n_heads: int = 4
     n_layers: int = 2
     dropout: float = 0.1
-    include_acceleration: bool = False
-    features_dim: int = 128
+    include_acceleration: bool = True
 
 
 @dataclass
@@ -66,8 +65,8 @@ class TrainingConfig:
     eval_freq: int = 10_000
     eval_episodes: int = 5
     log_interval: int = 1000
-    n_envs: int = 4  # Number of parallel training environments
-    n_eval_envs: int = 1  # Number of parallel evaluation environments
+    n_envs: int = 8  # Number of parallel training environments
+    n_eval_envs: int = 2  # Number of parallel evaluation environments
     seed: int = 42
 
 
@@ -77,7 +76,7 @@ class LoggingConfig:
 
     save_path: str = "sac_attention"
     tensorboard_log: str = None  # Will be auto-generated from save_path
-    save_freq: int = 50_000
+    save_freq: int = 10000
     verbose: int = 1
 
     def __post_init__(self):
@@ -91,8 +90,8 @@ class VideoConfig:
     """Video recording configuration."""
 
     record_video: bool = True
-    video_freq: int = 50_000  # Video recording frequency
-    video_length: int = 1000  # Length of recorded videos
+    video_freq: int = 5000  # Video recording frequency
+    video_length: int = 10000  # Length of recorded videos
 
 
 @dataclass
@@ -121,51 +120,6 @@ class FullConfig:
 # =============================================================================
 
 
-def get_quick_test_config() -> FullConfig:
-    """
-    Quick test configuration for development and debugging.
-    Fast training with minimal resources.
-    """
-    return FullConfig(
-        environment=EnvironmentConfig(
-            max_obstacles=5,
-            target_radius=10.0,
-            recognition_radius=50.0,
-            destruction_radius=100.0,
-            n_obstacles=3,
-            render_mode=None,
-        ),
-        feature_extractor=FeatureExtractorConfig(
-            d_model=32,
-            n_heads=2,
-            n_layers=1,
-            dropout=0.1,
-            include_acceleration=False,
-            features_dim=64,
-        ),
-        sac=SACConfig(
-            learning_rate=1e-3,
-            buffer_size=50_000,
-            batch_size=128,
-            learning_starts=1_000,
-        ),
-        network=NetworkConfig(net_arch=[128, 128]),
-        training=TrainingConfig(
-            total_timesteps=10_000,
-            eval_freq=2_000,
-            eval_episodes=3,
-            log_interval=500,
-            n_envs=2,
-            n_eval_envs=1,
-        ),
-        logging=LoggingConfig(save_freq=5_000, save_path="quick_test"),
-        video=VideoConfig(
-            record_video=True, video_freq=5_000, video_length=500
-        ),
-        device=DeviceConfig(device="auto"),
-    )
-
-
 def get_standard_config() -> FullConfig:
     """
     Standard configuration for normal training.
@@ -173,131 +127,40 @@ def get_standard_config() -> FullConfig:
     """
     return FullConfig(
         environment=EnvironmentConfig(
-            max_obstacles=10,
-            target_radius=10.0,
-            recognition_radius=100.0,
-            destruction_radius=200.0,
-            n_obstacles=5,
-            render_mode=None,
+            max_obstacles=50,
+            target_radius=1,
+            recognition_radius=10,
+            destruction_radius=25,
+            n_obstacles=50,
+            render_mode="rgb_array",
         ),
         feature_extractor=FeatureExtractorConfig(
             d_model=64,
             n_heads=4,
-            n_layers=2,
+            n_layers=1,
             dropout=0.1,
-            include_acceleration=False,
-            features_dim=128,
+            include_acceleration=True,
         ),
         sac=SACConfig(
             learning_rate=3e-4,
             buffer_size=1_000_000,
-            batch_size=256,
-            learning_starts=10_000,
+            batch_size=128,
+            learning_starts=1000,
         ),
         network=NetworkConfig(net_arch=[256, 256]),
         training=TrainingConfig(
-            total_timesteps=1_000_000,
-            eval_freq=20_000,
-            eval_episodes=5,
+            total_timesteps=1_000_000_000,
+            eval_freq=10_000,
+            eval_episodes=4,
             log_interval=1000,
-            n_envs=4,
-            n_eval_envs=1,
+            n_envs=8,
+            n_eval_envs=4,
         ),
-        logging=LoggingConfig(save_freq=50_000, save_path="standard"),
+        logging=LoggingConfig(save_freq=100_000, save_path="standard"),
         video=VideoConfig(
-            record_video=True, video_freq=50_000, video_length=1000
+            record_video=True, video_freq=100_000, video_length=10000
         ),
         device=DeviceConfig(device="auto"),
-    )
-
-
-def get_high_performance_config() -> FullConfig:
-    """
-    High-performance configuration for serious training.
-    Larger networks, more environments, longer training.
-    """
-    return FullConfig(
-        environment=EnvironmentConfig(
-            max_obstacles=15,
-            target_radius=8.0,
-            recognition_radius=120.0,
-            destruction_radius=250.0,
-            n_obstacles=8,
-            render_mode=None,
-        ),
-        feature_extractor=FeatureExtractorConfig(
-            d_model=128,
-            n_heads=8,
-            n_layers=3,
-            dropout=0.1,
-            include_acceleration=True,
-            features_dim=256,
-        ),
-        sac=SACConfig(
-            learning_rate=1e-4,
-            buffer_size=2_000_000,
-            batch_size=512,
-            learning_starts=25_000,
-        ),
-        network=NetworkConfig(net_arch=[512, 512, 256]),
-        training=TrainingConfig(
-            total_timesteps=5_000_000,
-            eval_freq=50_000,
-            eval_episodes=10,
-            log_interval=2000,
-            n_envs=8,
-            n_eval_envs=2,
-        ),
-        logging=LoggingConfig(save_freq=100_000, save_path="high_performance"),
-        video=VideoConfig(
-            record_video=True, video_freq=100_000, video_length=1500
-        ),
-        device=DeviceConfig(device="cuda"),
-    )
-
-
-def get_minimal_config() -> FullConfig:
-    """
-    Minimal configuration for resource-constrained environments.
-    Smallest possible setup while maintaining functionality.
-    """
-    return FullConfig(
-        environment=EnvironmentConfig(
-            max_obstacles=5,
-            target_radius=15.0,
-            recognition_radius=80.0,
-            destruction_radius=150.0,
-            n_obstacles=3,
-            render_mode=None,
-        ),
-        feature_extractor=FeatureExtractorConfig(
-            d_model=32,
-            n_heads=2,
-            n_layers=1,
-            dropout=0.0,
-            include_acceleration=False,
-            features_dim=64,
-        ),
-        sac=SACConfig(
-            learning_rate=5e-4,
-            buffer_size=100_000,
-            batch_size=64,
-            learning_starts=5_000,
-        ),
-        network=NetworkConfig(net_arch=[128, 64]),
-        training=TrainingConfig(
-            total_timesteps=100_000,
-            eval_freq=10_000,
-            eval_episodes=3,
-            log_interval=1000,
-            n_envs=2,
-            n_eval_envs=1,
-        ),
-        logging=LoggingConfig(save_freq=25_000, save_path="minimal"),
-        video=VideoConfig(
-            record_video=False, video_freq=25_000, video_length=300
-        ),
-        device=DeviceConfig(device="cpu"),
     )
 
 
@@ -306,10 +169,7 @@ def get_minimal_config() -> FullConfig:
 # =============================================================================
 
 CONFIG_PRESETS = {
-    "quick_test": get_quick_test_config,
     "standard": get_standard_config,
-    "high_performance": get_high_performance_config,
-    "minimal": get_minimal_config,
 }
 
 
@@ -322,13 +182,6 @@ def get_config(preset_name: str) -> FullConfig:
 
     Returns:
         FullConfig: Complete configuration object
-
-    Available presets:
-        - "quick_test": Fast testing configuration
-        - "standard": Balanced training configuration
-        - "high_performance": Resource-intensive optimal training
-        - "attention_research": Focus on attention mechanism research
-        - "minimal": Minimal resource configuration
     """
     if preset_name not in CONFIG_PRESETS:
         available = ", ".join(CONFIG_PRESETS.keys())

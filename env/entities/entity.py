@@ -10,7 +10,7 @@ class Entity:
 
     def __init__(
         self,
-        radius: float = 1.0,
+        radius: float = 0.5,
         mass: float = 1.0,
         color: Tuple[int, int, int] = (100, 100, 100),
         collision_type: CollisionType = CollisionType.ENTITY,

@@ -32,7 +32,7 @@ from scripts.configs import (
 # =============================================================================
 
 # Choose your configuration preset here:
-CONFIG_PRESET = "quick_test"  # Change this to use different configurations
+CONFIG_PRESET = "standard"  # Change this to use different configurations
 
 config = get_config(CONFIG_PRESET)
 
