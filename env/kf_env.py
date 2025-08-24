@@ -192,8 +192,8 @@ class KFEnv(gym.Env):
 
         observation = self._get_obs_dict()
         reward = self._calculate_reward()
-        terminated = self.collision_occurred or self._check_target_reached()
-        truncated = self._is_out_destruction_(self.target_position)
+        terminated = self.collision_occurred or self._check_target_reached() 
+        truncated = self._is_out_destruction_(self.target_position) or self.elapsed_steps > 5000 #시간 지나도 계속 도달 못하면 강제종료
 
         return observation, reward, terminated, truncated, {}
 
