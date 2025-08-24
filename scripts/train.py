@@ -23,7 +23,6 @@ from env.entities.stable_obstacle import StableObstacle
 from extractors.attention_extractor import AttentionExtractor
 from scripts.configs import (
     get_config,
-    print_config_summary,
     list_available_presets,
 )
 
@@ -74,7 +73,6 @@ def make_env(eval_mode=False):
 
 def main():
     print(f"Using configuration preset: '{CONFIG_PRESET}'")
-    print_config_summary(config)
 
     torch.manual_seed(config.training.seed)
 
@@ -108,7 +106,6 @@ def main():
             "n_layers": config.feature_extractor.n_layers,
             "dropout": config.feature_extractor.dropout,
             "include_acceleration": config.feature_extractor.include_acceleration,
-            "features_dim": config.feature_extractor.features_dim,
         },
     }
 
