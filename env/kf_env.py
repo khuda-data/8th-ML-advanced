@@ -55,12 +55,22 @@ class KFEnv(gym.Env):
             }
         )
 
-        pygame.init()
-        self.screen_size = 800
-        self.screen = pygame.display.set_mode(
-            (self.screen_size, self.screen_size)
-        )
-        self.clock = pygame.time.Clock()
+        if self.render_mode == "human":
+            pygame.init()
+            self.screen_size = 800
+            self.screen = pygame.display.set_mode(
+                (self.screen_size, self.screen_size)
+            )
+            self.clock = pygame.time.Clock()
+        elif self.render_mode == "rgb_array":
+            pygame.init()
+            self.screen_size = 800
+            self.screen = pygame.Surface((self.screen_size, self.screen_size))
+            self.clock = None
+        else:
+            self.screen_size = 800
+            self.screen = None
+            self.clock = None
 
         self.space = pymunk.Space()
         self.space.gravity = (0, 0)
@@ -225,8 +235,8 @@ class KFEnv(gym.Env):
             obstacle.set_position(pos)
             obstacle.reset()
 
-    def render(self) -> None:
-        if self.render_mode is None:
+    def render(self):
+        if self.render_mode is None or self.screen is None:
             return
 
         self.screen.fill((255, 255, 255))
@@ -274,7 +284,12 @@ class KFEnv(gym.Env):
 
         if self.render_mode == "human":
             pygame.display.flip()
-            self.clock.tick(self.metadata["render_fps"])
+            if self.clock:
+                self.clock.tick(self.metadata["render_fps"])
+        elif self.render_mode == "rgb_array":
+            rgb_array = pygame.surfarray.array3d(self.screen)
+            rgb_array = np.transpose(rgb_array, (1, 0, 2))
+            return rgb_array
 
     def _get_random_position(
         self, area_radius: float, center: Vector2 = Vector2(0, 0)
