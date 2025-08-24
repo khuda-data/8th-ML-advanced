@@ -18,8 +18,8 @@ class KFEnv(gym.Env):
         render_mode: Optional[str] = None,
         max_obstacles: int = 10,
         target_radius: float = 1.0,
-        recognition_radius: float = 7.0,  # 인식 범위
-        destruction_radius: float = 15.0,  # 파괴 거리
+        recognition_radius: float = 7.0,
+        destruction_radius: float = 15.0,
     ) -> None:
         super().__init__()
 
@@ -126,13 +126,12 @@ class KFEnv(gym.Env):
             (e.get_position(), e.radius) for e in self._get_entities()
         ]
 
-        # 에이전트 위치를 중심으로 안전한 위치 탐색
         center_pos = self.agent.get_position() if self.agent else Vector2(0, 0)
-        safe_position = self._find_safe_position(
+        safe_position = self._find_safe_position_in(
             entity.radius,
             unsafe_areas,
             area_radius=self.destruction_radius,
-            center=center_pos,
+            area_center=center_pos,
         )
         self._reset_entity(entity, safe_position)
         entity.set_space(self.space)
@@ -159,11 +158,11 @@ class KFEnv(gym.Env):
 
         unsafe_areas = [(agent_pos, self.agent.radius)]
         for obstacle in self.obstacles:
-            safe_position = self._find_safe_position(
+            safe_position = self._find_safe_position_in(
                 obstacle.radius,
                 unsafe_areas,
                 area_radius=self.destruction_radius,
-                center=agent_pos,
+                area_center=agent_pos,
             )
             self._reset_entity(obstacle, safe_position)
             unsafe_areas.append((safe_position, obstacle.radius))
@@ -192,8 +191,11 @@ class KFEnv(gym.Env):
 
         observation = self._get_obs_dict()
         reward = self._calculate_reward()
-        terminated = self.collision_occurred or self._check_target_reached() 
-        truncated = self._is_out_destruction_(self.target_position) or self.elapsed_steps > 5000 #시간 지나도 계속 도달 못하면 강제종료
+        terminated = self.collision_occurred or self._check_target_reached()
+        truncated = (
+            self._is_agent_out_destruction_(self.target_position)
+            or self.elapsed_steps > 5000
+        )
 
         return observation, reward, terminated, truncated, {}
 
@@ -201,32 +203,27 @@ class KFEnv(gym.Env):
         if not self.agent:
             return
 
-        obstacles_to_remove = []
+        obstacles_to_adjust: List[Entity] = []
         for obstacle in self.obstacles:
-            if self._is_out_destruction_(obstacle.get_position()):
-                obstacles_to_remove.append(obstacle)
+            if self._is_agent_out_destruction_(obstacle.get_position()):
+                obstacles_to_adjust.append(obstacle)
 
-        for obstacle in obstacles_to_remove:
+        for obstacle in obstacles_to_adjust:
             obstacle.unset_space()
-            self.obstacles.remove(obstacle)
 
-            new_obstacle = StableObstacle(
-                radius=obstacle.radius, mass=obstacle.mass, speed=obstacle.speed
-            )
             unsafe_areas = [
                 (e.get_position(), e.radius) for e in self._get_entities()
             ]
 
             pos = self._find_safe_position_in_ring(
-                new_obstacle.radius,
+                obstacle.radius,
                 unsafe_areas,
                 center=self.agent.get_position(),
                 inner_radius=self.recognition_radius,
                 outer_radius=self.destruction_radius,
             )
-            self._reset_entity(new_obstacle, pos)
-            new_obstacle.set_space(self.space)
-            self.obstacles.append(new_obstacle)
+            obstacle.set_position(pos)
+            obstacle.reset()
 
     def render(self) -> None:
         if self.render_mode is None:
@@ -242,21 +239,19 @@ class KFEnv(gym.Env):
         )
         screen_center = (self.screen_size // 2, self.screen_size // 2)
 
-        # 파괴 범위 링 그리기 (빨간색)
         destruction_screen_radius = int(self.screen_size / 2)
         pygame.draw.circle(
             self.screen,
-            (255, 0, 0),  # 빨간색
+            (255, 0, 0),
             screen_center,
             destruction_screen_radius,
             2,
         )
 
-        # 인식 범위 링 그리기 (초록색)
         recognition_screen_radius = int(self.recognition_radius * scale)
         pygame.draw.circle(
             self.screen,
-            (0, 255, 0),  # 초록색
+            (0, 255, 0),
             screen_center,
             recognition_screen_radius,
             2,
@@ -264,23 +259,6 @@ class KFEnv(gym.Env):
 
         target_screen_pos = self.target_position * scale + offset
         target_screen_radius = int(self.target_radius * scale)
-
-        # if self._is_in_recognition_(self.target_position):
-        #     pygame.draw.circle(
-        #         self.screen,
-        #         (0, 255, 0),
-        #         (int(target_screen_pos.x), int(target_screen_pos.y)),
-        #         target_screen_radius,
-        #         3,
-        #     )
-        # else:
-        #     pygame.draw.circle(
-        #         self.screen,
-        #         (120, 120, 120),
-        #         (int(target_screen_pos.x), int(target_screen_pos.y)),
-        #         target_screen_radius,
-        #         3,
-        #     )
 
         pygame.draw.circle(
             self.screen,
@@ -291,13 +269,8 @@ class KFEnv(gym.Env):
         )
 
         for entity in self._get_entities():
-            if self._is_in_recognition_(entity.get_position()):
-                # if agent_pos.distance_to(entity.get_position()) > 0:
-                #     entity.color = (255, 100, 100)
+            if self._is_agent_in_recognition_(entity.get_position()):
                 entity.render(self.screen, scale, offset)
-            # else:
-            #     entity.color = (120, 120, 120)
-            #     entity.render(self.screen, scale, offset)
 
         if self.render_mode == "human":
             pygame.display.flip()
@@ -332,7 +305,7 @@ class KFEnv(gym.Env):
                     break
 
                 # 에이전트와의 거리를 계산하여 recognition_radius 안에 있을 때만 관측에 포함
-                if self._is_in_recognition_(obstacle.get_position()):
+                if self._is_agent_in_recognition_(obstacle.get_position()):
                     obstacles_obs[obs_idx] = self._encode_entity(obstacle)
                     mask[obs_idx] = 1.0
                     obs_idx += 1
@@ -372,7 +345,7 @@ class KFEnv(gym.Env):
             reward += RewardType.TARGET_REACHED
         elif self.collision_occurred:
             reward -= RewardType.COLLISION_OCCURRED
-        elif self._is_out_destruction_(self.target_position):
+        elif self._is_agent_out_destruction_(self.target_position):
             reward -= RewardType.TARGET_DESTROYED
 
         reward -= self._get_time_penalty()
@@ -388,12 +361,12 @@ class KFEnv(gym.Env):
         agent_pos = self.agent.get_position()
         return agent_pos.distance_to(self.target_position) < self.target_radius
 
-    def _is_out_destruction_(self, vector: Vector2):
+    def _is_agent_out_destruction_(self, vector: Vector2):
         agent_pos = self.agent.get_position()
 
         return agent_pos.distance_to(vector) > self.destruction_radius
 
-    def _is_in_recognition_(self, vector: Vector2):
+    def _is_agent_in_recognition_(self, vector: Vector2):
         agent_pos = self.agent.get_position()
 
         return agent_pos.distance_to(vector) < self.recognition_radius
@@ -402,21 +375,21 @@ class KFEnv(gym.Env):
         entity.set_position(position)
         entity.reset()
 
-    def _find_safe_position(
+    def _find_safe_position_in(
         self,
-        radius: float,
+        position_radius: float,
         unsafe_areas: List[Tuple[Vector2, float]],
         area_radius: float,
-        center: Vector2,
+        area_center: Vector2,
         max_attempts: int = 100,
     ) -> Vector2:
         for _ in range(max_attempts):
             position = self._get_random_position(
-                area_radius=area_radius, center=center
+                area_radius=area_radius, center=area_center
             )
-            if self._is_safe_area((position, radius), unsafe_areas):
+            if self._is_safe_area((position, position_radius), unsafe_areas):
                 return position
-        return center
+        return area_center
 
     def _find_safe_position_in_ring(
         self,
