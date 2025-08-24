@@ -108,7 +108,7 @@ class KFEnv(gym.Env):
 
     def _on_agent_collision(self, arbiter, space, data):
         self.collision_occurred = True
-        return True
+        return False
 
     def add_agent(self, agent_class: Type[Agent] = Agent, **kwargs) -> Agent:
         if self.agent is not None:
@@ -279,8 +279,7 @@ class KFEnv(gym.Env):
         )
 
         for entity in self._get_entities():
-            if self._is_agent_in_recognition_(entity.get_position()):
-                entity.render(self.screen, scale, offset)
+            entity.render(self.screen, scale, offset)
 
         if self.render_mode == "human":
             pygame.display.flip()
@@ -315,22 +314,13 @@ class KFEnv(gym.Env):
         if self.agent:
             obs_idx = 0
             for obstacle in self.obstacles:
-                # 관측 가능한 최대 장애물 수를 넘으면 중단
                 if obs_idx >= self.max_obstacles:
                     break
 
-                # 에이전트와의 거리를 계산하여 recognition_radius 안에 있을 때만 관측에 포함
                 if self._is_agent_in_recognition_(obstacle.get_position()):
                     obstacles_obs[obs_idx] = self._encode_entity(obstacle)
                     mask[obs_idx] = 1.0
                     obs_idx += 1
-
-        # for i, obstacle in enumerate(self.obstacles):
-        #     if i >= self.max_obstacles:
-        #         break
-
-        #     obstacles_obs[i] = self._encode_entity(obstacle)
-        #     mask[i] = 1.0  # Mark as valid obstacle
 
         return {
             "agent": agent_obs,

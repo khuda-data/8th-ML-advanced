@@ -27,11 +27,11 @@ class Entity:
         moment = pymunk.moment_for_circle(mass, 0, radius)
         self.body = pymunk.Body(mass, moment)
         self.shape = pymunk.Circle(self.body, radius)
-        self.shape.friction = 0.7
         self.shape.collision_type = collision_type
 
-        self.shape.elasticity = 1.0
-        self.shape.friction = 0.0
+        # Reduced elasticity and increased friction for more realistic collisions
+        self.shape.elasticity = 0.3  # Less bouncy
+        self.shape.friction = 0.5  # More friction to prevent sliding
 
         self.reset()
 

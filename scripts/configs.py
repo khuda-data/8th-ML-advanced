@@ -150,15 +150,15 @@ def get_standard_config() -> FullConfig:
         network=NetworkConfig(net_arch=[256, 256]),
         training=TrainingConfig(
             total_timesteps=1_000_000_000,
-            eval_freq=10_000,
+            eval_freq=100,
             eval_episodes=4,
-            log_interval=1000,
+            log_interval=10,
             n_envs=8,
             n_eval_envs=4,
         ),
-        logging=LoggingConfig(save_freq=100_000, save_path="standard"),
+        logging=LoggingConfig(save_freq=1_000, save_path="standard"),
         video=VideoConfig(
-            record_video=True, video_freq=100_000, video_length=10000
+            record_video=True, video_freq=1_000, video_length=1_000
         ),
         device=DeviceConfig(device="auto"),
     )
