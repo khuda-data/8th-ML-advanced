@@ -1,6 +1,5 @@
 """Unit tests for Entity base class"""
 
-import pytest
 import pymunk
 from pygame import Vector2
 from ..entity import Entity

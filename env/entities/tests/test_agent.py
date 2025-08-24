@@ -1,6 +1,5 @@
 """Unit tests for Agent class"""
 
-import pytest
 import numpy as np
 from pygame import Vector2
 from ..agent import Agent

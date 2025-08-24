@@ -1,6 +1,5 @@
 """Unit tests for StableObstacle class"""
 
-import pytest
 import numpy as np
 from pygame import Vector2
 from ..stable_obstacle import StableObstacle
