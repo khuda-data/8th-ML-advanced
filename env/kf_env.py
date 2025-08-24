@@ -6,7 +6,7 @@ import pymunk
 import numpy as np
 from typing import List, Optional, Tuple, Dict, Any, Type
 
-from .types import CollisionType
+from .types import CollisionType, RewardType
 from .entities import Agent, Entity, StableObstacle
 
 
@@ -16,22 +16,25 @@ class KFEnv(gym.Env):
     def __init__(
         self,
         render_mode: Optional[str] = None,
-        world_size: float = 20.0,
         max_obstacles: int = 10,
         target_radius: float = 1.0,
+        recognition_radius: float = 7.0,  # 인식 범위
+        destruction_radius: float = 15.0,  # 파괴 거리
     ) -> None:
         super().__init__()
 
+        self.elapsed_steps = 0
+
         self.render_mode = render_mode
-        self.world_size = world_size
         self.max_obstacles = max_obstacles
         self.target_radius = target_radius
+        self.recognition_radius = recognition_radius
+        self.destruction_radius = destruction_radius
 
         self.action_space = spaces.Box(
             low=-1.0, high=1.0, shape=(2,), dtype=np.float32
         )
 
-        # Each entity: [radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y] = 7 dimensions
         self.observation_space = spaces.Dict(
             {
                 "agent": spaces.Box(
@@ -73,11 +76,15 @@ class KFEnv(gym.Env):
             CollisionType.OBSTACLE,
             begin=self._on_agent_collision,
         )
-
         self.space.on_collision(
             CollisionType.AGENT,
             CollisionType.ENTITY,
             begin=self._on_agent_collision,
+        )
+
+        self.space.on_collision(
+            CollisionType.OBSTACLE,
+            CollisionType.OBSTACLE,
         )
 
         self.reset()
@@ -96,7 +103,6 @@ class KFEnv(gym.Env):
     def add_agent(self, agent_class: Type[Agent] = Agent, **kwargs) -> Agent:
         if self.agent is not None:
             self.agent.unset_space()
-
         self.agent = self._add_entity(agent_class, **kwargs)
         return self.agent
 
@@ -107,7 +113,6 @@ class KFEnv(gym.Env):
             raise ValueError(
                 f"Cannot add more than {self.max_obstacles} obstacles"
             )
-
         obstacle = self._add_entity(obstacle_class, **kwargs)
         self.obstacles.append(obstacle)
         return obstacle
@@ -117,25 +122,25 @@ class KFEnv(gym.Env):
     ) -> Entity:
         entity = entity_class(**kwargs)
 
-        unsafe_areas = []
-        for other_entity in self._get_entities():
-            if other_entity != entity:
-                unsafe_areas.append(
-                    (other_entity.get_position(), other_entity.radius)
-                )
+        unsafe_areas = [
+            (e.get_position(), e.radius) for e in self._get_entities()
+        ]
 
-        self._reset_entity(
-            entity, self._find_safe_position(entity.radius, unsafe_areas)
+        # 에이전트 위치를 중심으로 안전한 위치 탐색
+        center_pos = self.agent.get_position() if self.agent else Vector2(0, 0)
+        safe_position = self._find_safe_position(
+            entity.radius,
+            unsafe_areas,
+            area_radius=self.destruction_radius,
+            center=center_pos,
         )
-
+        self._reset_entity(entity, safe_position)
         entity.set_space(self.space)
-
         return entity
 
     def clear_entities(self) -> None:
         for entity in self._get_entities():
             entity.unset_space()
-
         self.agent = None
         self.obstacles = []
 
@@ -145,17 +150,27 @@ class KFEnv(gym.Env):
         super().reset(seed=seed)
 
         self.collision_occurred = False
+        self.elapsed_steps = 0
 
-        unsafe_areas = []
+        if self.agent is None:
+            self.add_agent()
+        self._reset_entity(self.agent, Vector2(0, 0))
+        agent_pos = self.agent.get_position()
 
-        for entity in self._get_entities():
+        unsafe_areas = [(agent_pos, self.agent.radius)]
+        for obstacle in self.obstacles:
             safe_position = self._find_safe_position(
-                entity.radius, unsafe_areas
+                obstacle.radius,
+                unsafe_areas,
+                area_radius=self.destruction_radius,
+                center=agent_pos,
             )
-            self._reset_entity(entity, safe_position)
-            unsafe_areas.append((safe_position, entity.radius))
+            self._reset_entity(obstacle, safe_position)
+            unsafe_areas.append((safe_position, obstacle.radius))
 
-        self.target_position = self._get_random_position()
+        self.target_position = self._get_random_position(
+            area_radius=self.destruction_radius, center=agent_pos
+        )
 
         observation = self._get_obs_dict()
         return observation, {}
@@ -163,91 +178,171 @@ class KFEnv(gym.Env):
     def step(
         self, action: np.ndarray
     ) -> Tuple[Dict[str, np.ndarray], float, bool, bool, Dict[str, Any]]:
-
         if self.agent is not None:
             self.agent.apply_action(action)
 
-        # Update physics
+        self.elapsed_steps += 1
         dt = 1.0 / self.metadata["render_fps"]
         self.space.step(dt)
 
         for entity in self._get_entities():
             entity.update(dt)
 
+        self._manage_obstacles()
+
         observation = self._get_obs_dict()
         reward = self._calculate_reward()
-        terminated = self.collision_occurred or self._check_target_reached()
-        truncated = self._check_out_of_bounds()
+        terminated = self.collision_occurred or self._check_target_reached() 
+        truncated = self._is_out_destruction_(self.target_position) or self.elapsed_steps > 5000 #시간 지나도 계속 도달 못하면 강제종료
 
         return observation, reward, terminated, truncated, {}
+
+    def _manage_obstacles(self):
+        if not self.agent:
+            return
+
+        obstacles_to_remove = []
+        for obstacle in self.obstacles:
+            if self._is_out_destruction_(obstacle.get_position()):
+                obstacles_to_remove.append(obstacle)
+
+        for obstacle in obstacles_to_remove:
+            obstacle.unset_space()
+            self.obstacles.remove(obstacle)
+
+            new_obstacle = StableObstacle(
+                radius=obstacle.radius, mass=obstacle.mass, speed=obstacle.speed
+            )
+            unsafe_areas = [
+                (e.get_position(), e.radius) for e in self._get_entities()
+            ]
+
+            pos = self._find_safe_position_in_ring(
+                new_obstacle.radius,
+                unsafe_areas,
+                center=self.agent.get_position(),
+                inner_radius=self.recognition_radius,
+                outer_radius=self.destruction_radius,
+            )
+            self._reset_entity(new_obstacle, pos)
+            new_obstacle.set_space(self.space)
+            self.obstacles.append(new_obstacle)
 
     def render(self) -> None:
         if self.render_mode is None:
             return
 
         self.screen.fill((255, 255, 255))
+        scale = self.screen_size / (2 * self.destruction_radius)
 
-        # Convert world coordinates to screen coordinates
-        scale = self.screen_size / self.world_size
-        offset = self.screen_size / 2
+        agent_pos = self.agent.get_position() if self.agent else Vector2(0, 0)
+        offset = (
+            Vector2(self.screen_size / 2, self.screen_size / 2)
+            - agent_pos * scale
+        )
+        screen_center = (self.screen_size // 2, self.screen_size // 2)
 
-        # Draw target
-        target_screen_x = int(self.target_position.x * scale + offset)
-        target_screen_y = int(self.target_position.y * scale + offset)
+        # 파괴 범위 링 그리기 (빨간색)
+        destruction_screen_radius = int(self.screen_size / 2)
+        pygame.draw.circle(
+            self.screen,
+            (255, 0, 0),  # 빨간색
+            screen_center,
+            destruction_screen_radius,
+            2,
+        )
+
+        # 인식 범위 링 그리기 (초록색)
+        recognition_screen_radius = int(self.recognition_radius * scale)
+        pygame.draw.circle(
+            self.screen,
+            (0, 255, 0),  # 초록색
+            screen_center,
+            recognition_screen_radius,
+            2,
+        )
+
+        target_screen_pos = self.target_position * scale + offset
         target_screen_radius = int(self.target_radius * scale)
+
+        # if self._is_in_recognition_(self.target_position):
+        #     pygame.draw.circle(
+        #         self.screen,
+        #         (0, 255, 0),
+        #         (int(target_screen_pos.x), int(target_screen_pos.y)),
+        #         target_screen_radius,
+        #         3,
+        #     )
+        # else:
+        #     pygame.draw.circle(
+        #         self.screen,
+        #         (120, 120, 120),
+        #         (int(target_screen_pos.x), int(target_screen_pos.y)),
+        #         target_screen_radius,
+        #         3,
+        #     )
+
         pygame.draw.circle(
             self.screen,
             (0, 255, 0),
-            (target_screen_x, target_screen_y),
+            (int(target_screen_pos.x), int(target_screen_pos.y)),
             target_screen_radius,
             3,
         )
 
         for entity in self._get_entities():
-            entity.render(self.screen, scale, offset)
-
-        # Draw boundaries
-        pygame.draw.rect(
-            self.screen,
-            (0, 0, 0),
-            pygame.Rect(0, 0, self.screen_size, self.screen_size),
-            3,
-        )
+            if self._is_in_recognition_(entity.get_position()):
+                # if agent_pos.distance_to(entity.get_position()) > 0:
+                #     entity.color = (255, 100, 100)
+                entity.render(self.screen, scale, offset)
+            # else:
+            #     entity.color = (120, 120, 120)
+            #     entity.render(self.screen, scale, offset)
 
         if self.render_mode == "human":
             pygame.display.flip()
             self.clock.tick(self.metadata["render_fps"])
 
-    def _get_random_position(self, radius: float = 2.0) -> Vector2:
-        half_size = self.world_size / 2 - radius
-        x = self.np_random.uniform(-half_size, half_size)
-        y = self.np_random.uniform(-half_size, half_size)
+    def _get_random_position(
+        self, area_radius: float, center: Vector2 = Vector2(0, 0)
+    ) -> Vector2:
+        r = np.sqrt(self.np_random.uniform(0, (area_radius - 1.0) ** 2))
+        theta = self.np_random.uniform(0, 2 * np.pi)
+        x = center.x + r * np.cos(theta)
+        y = center.y + r * np.sin(theta)
         return Vector2(x, y)
 
     def _get_obs_dict(self) -> Dict[str, np.ndarray]:
-        """Return observation as dictionary with fixed-size numpy arrays"""
-        # Agent observation: [radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y]
         agent_obs = (
             self._encode_entity(self.agent)
             if self.agent
             else np.zeros(7, dtype=np.float32)
         )
-
-        # Target observation: [pos_x, pos_y]
         target_obs = np.array(
             [self.target_position.x, self.target_position.y], dtype=np.float32
         )
-
-        # Obstacles observation: (max_obstacles, 7) with padding
         obstacles_obs = np.zeros((self.max_obstacles, 7), dtype=np.float32)
         mask = np.zeros(self.max_obstacles, dtype=np.float32)
 
-        for i, obstacle in enumerate(self.obstacles):
-            if i >= self.max_obstacles:
-                break
+        if self.agent:
+            obs_idx = 0
+            for obstacle in self.obstacles:
+                # 관측 가능한 최대 장애물 수를 넘으면 중단
+                if obs_idx >= self.max_obstacles:
+                    break
 
-            obstacles_obs[i] = self._encode_entity(obstacle)
-            mask[i] = 1.0  # Mark as valid obstacle
+                # 에이전트와의 거리를 계산하여 recognition_radius 안에 있을 때만 관측에 포함
+                if self._is_in_recognition_(obstacle.get_position()):
+                    obstacles_obs[obs_idx] = self._encode_entity(obstacle)
+                    mask[obs_idx] = 1.0
+                    obs_idx += 1
+
+        # for i, obstacle in enumerate(self.obstacles):
+        #     if i >= self.max_obstacles:
+        #         break
+
+        #     obstacles_obs[i] = self._encode_entity(obstacle)
+        #     mask[i] = 1.0  # Mark as valid obstacle
 
         return {
             "agent": agent_obs,
@@ -257,21 +352,11 @@ class KFEnv(gym.Env):
         }
 
     def _encode_entity(self, entity: Entity) -> np.ndarray:
-        """Encode an entity into 7D array: [radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y]"""
         pos = entity.get_position()
         vel = entity.get_velocity()
         acc = entity.get_acceleration()
-
         return np.array(
-            [
-                entity.radius,
-                pos.x,
-                pos.y,
-                vel.x,
-                vel.y,
-                acc.x,
-                acc.y,
-            ],
+            [entity.radius, pos.x, pos.y, vel.x, vel.y, acc.x, acc.y],
             dtype=np.float32,
         )
 
@@ -281,33 +366,37 @@ class KFEnv(gym.Env):
 
         agent_pos = self.agent.get_position()
         distance_to_target = agent_pos.distance_to(self.target_position)
-
-        reward = -distance_to_target * 0.1
+        reward = -distance_to_target * RewardType.DISTANCE_ALPHA
 
         if self._check_target_reached():
-            reward += 100.0
+            reward += RewardType.TARGET_REACHED
+        elif self.collision_occurred:
+            reward -= RewardType.COLLISION_OCCURRED
+        elif self._is_out_destruction_(self.target_position):
+            reward -= RewardType.TARGET_DESTROYED
 
+        reward -= self._get_time_penalty()
         return reward
+
+    def _get_time_penalty(self) -> float:
+        dt = 1.0 / self.metadata["render_fps"]
+        return RewardType.TIME_ALPHA * self.elapsed_steps * dt
 
     def _check_target_reached(self) -> bool:
         if not self.agent:
             return False
-
         agent_pos = self.agent.get_position()
-        distance_to_target = agent_pos.distance_to(self.target_position)
+        return agent_pos.distance_to(self.target_position) < self.target_radius
 
-        return distance_to_target < self.target_radius
-
-    def _check_out_of_bounds(self) -> bool:
-        """Check if agent is out of world bounds"""
-        if not self.agent:
-            return False
-
+    def _is_out_destruction_(self, vector: Vector2):
         agent_pos = self.agent.get_position()
-        half_size = self.world_size / 2
 
-        # Check if agent center is outside bounds
-        return abs(agent_pos.x) > half_size or abs(agent_pos.y) > half_size
+        return agent_pos.distance_to(vector) > self.destruction_radius
+
+    def _is_in_recognition_(self, vector: Vector2):
+        agent_pos = self.agent.get_position()
+
+        return agent_pos.distance_to(vector) < self.recognition_radius
 
     def _reset_entity(self, entity: Entity, position: Vector2):
         entity.set_position(position)
@@ -317,15 +406,39 @@ class KFEnv(gym.Env):
         self,
         radius: float,
         unsafe_areas: List[Tuple[Vector2, float]],
+        area_radius: float,
+        center: Vector2,
         max_attempts: int = 100,
-    ) -> Optional[Vector2]:
+    ) -> Vector2:
         for _ in range(max_attempts):
-            position = self._get_random_position(radius=radius)
+            position = self._get_random_position(
+                area_radius=area_radius, center=center
+            )
+            if self._is_safe_area((position, radius), unsafe_areas):
+                return position
+        return center
+
+    def _find_safe_position_in_ring(
+        self,
+        radius: float,
+        unsafe_areas: List[Tuple[Vector2, float]],
+        center: Vector2,
+        inner_radius: float,
+        outer_radius: float,
+        max_attempts: int = 100,
+    ) -> Vector2:
+        for _ in range(max_attempts):
+            r = np.sqrt(
+                self.np_random.uniform(inner_radius**2, outer_radius**2)
+            )
+            theta = self.np_random.uniform(0, 2 * np.pi)
+            position = Vector2(
+                center.x + r * np.cos(theta), center.y + r * np.sin(theta)
+            )
 
             if self._is_safe_area((position, radius), unsafe_areas):
                 return position
-
-        return Vector2(0, 0)
+        return Vector2(center.x + outer_radius, center.y)
 
     def _is_safe_area(
         self,

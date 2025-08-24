@@ -30,6 +30,9 @@ class Entity:
         self.shape.friction = 0.7
         self.shape.collision_type = collision_type
 
+        self.shape.elasticity = 1.0
+        self.shape.friction = 0.0
+
         self.reset()
 
     def set_space(self, space: pymunk.Space) -> None:
@@ -74,8 +77,12 @@ class Entity:
     ) -> None:
         """Render entity on pygame screen with scaling and offset"""
         pos = self.get_position()
-        screen_x = int(pos.x * scale + offset)
-        screen_y = int(pos.y * scale + offset)
+
+        screen_pos = pos * scale + offset
+
+        screen_x = int(screen_pos.x)
+        screen_y = int(screen_pos.y)
+
         radius = int(self.radius * scale)
 
         pygame.draw.circle(screen, self.color, (screen_x, screen_y), radius)
@@ -83,7 +90,6 @@ class Entity:
 
     def update(self, dt: float):
         current_velocity = self.get_velocity()
-
         # Calculate acceleration based on velocity change
         self.acceleration = Vector2(
             (

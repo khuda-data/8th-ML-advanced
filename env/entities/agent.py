@@ -49,7 +49,6 @@ class Agent(Entity):
     def update(self, dt: float):
         super().update(dt)
 
-        # Then apply velocity constraints
         velocity = self.get_velocity()
         speed = np.sqrt(velocity.x**2 + velocity.y**2)
 
