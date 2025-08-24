@@ -145,20 +145,20 @@ def get_standard_config() -> FullConfig:
             learning_rate=3e-4,
             buffer_size=1_000_000,
             batch_size=128,
-            learning_starts=1000,
+            learning_starts=10_000,
         ),
         network=NetworkConfig(net_arch=[256, 256]),
         training=TrainingConfig(
             total_timesteps=1_000_000_000,
-            eval_freq=100,
-            eval_episodes=4,
-            log_interval=10,
-            n_envs=8,
-            n_eval_envs=4,
+            eval_freq=10_000,
+            eval_episodes=1,
+            log_interval=1_000,
+            n_envs=4,
+            n_eval_envs=1,
         ),
-        logging=LoggingConfig(save_freq=1_000, save_path="standard"),
+        logging=LoggingConfig(save_freq=100_000, save_path="standard"),
         video=VideoConfig(
-            record_video=True, video_freq=1_000, video_length=1_000
+            record_video=True, video_freq=10_000, video_length=1_000
         ),
         device=DeviceConfig(device="auto"),
     )
