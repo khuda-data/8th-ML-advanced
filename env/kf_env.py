@@ -219,8 +219,6 @@ class KFEnv(gym.Env):
                 obstacles_to_adjust.append(obstacle)
 
         for obstacle in obstacles_to_adjust:
-            obstacle.unset_space()
-
             unsafe_areas = [
                 (e.get_position(), e.radius) for e in self._get_entities()
             ]
