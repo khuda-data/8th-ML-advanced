@@ -7,7 +7,7 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from .utils import (
     extract_agent_features,
     extract_target_relative_features,
-    extract_obstacle_relative_features_vectorized,
+    extract_obstacle_relative_features,
     get_feature_dimensions,
     validate_observation_tensors,
 )
@@ -107,7 +107,7 @@ class AttentionExtractor(BaseFeaturesExtractor):
 
         self._output_projection = nn.Linear(d_model, d_model)
 
-    def _create_attention_mask(mask: torch.Tensor) -> torch.Tensor:
+    def _create_attention_mask(self, mask: torch.Tensor) -> torch.Tensor:
         """
         Create an attention mask for PyTorch MultiheadAttention mechanism.
 
@@ -171,7 +171,7 @@ class AttentionExtractor(BaseFeaturesExtractor):
             agent_data, target_data
         )
 
-        obstacle_features = extract_obstacle_relative_features_vectorized(
+        obstacle_features = extract_obstacle_relative_features(
             agent_data, obstacles_data, mask, self._include_acceleration
         )
 
@@ -219,7 +219,7 @@ class AttentionExtractor(BaseFeaturesExtractor):
             self._feed_forwards,
         )
 
-        for i, q_proj, k_proj, v_proj, mha, ln, ff in layers:
+        for _, q_proj, k_proj, v_proj, mha, ln, ff in layers:
             q = q_proj(attended_output.squeeze(1)).unsqueeze(1)
             k = k_proj(obstacle_features)
             v = v_proj(obstacle_features)

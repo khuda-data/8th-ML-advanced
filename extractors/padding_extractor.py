@@ -6,7 +6,7 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from .utils import (
     extract_agent_features,
     extract_target_relative_features,
-    extract_obstacle_relative_features_vectorized,
+    extract_obstacle_relative_features,
     flatten_obstacle_features,
     get_feature_dimensions,
     validate_observation_tensors,
@@ -91,7 +91,7 @@ class PaddingExtractor(BaseFeaturesExtractor):
             agent_data, target_data
         )
 
-        obstacle_features = extract_obstacle_relative_features_vectorized(
+        obstacle_features = extract_obstacle_relative_features(
             agent_data, obstacles_data, mask, self._include_acceleration
         )
 

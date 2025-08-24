@@ -9,7 +9,7 @@ import pytest
 import torch
 import torch.nn as nn
 from gymnasium import spaces
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from ..lstm_extractor import LSTMExtractor
 
@@ -211,16 +211,16 @@ class TestLSTMExtractor:
         assert result.shape == (3, extractor._features_dim)
         assert torch.all(torch.isfinite(result))
 
-# tests/test_lstm_extractor.py 일부
-
     def test_forward_with_masked_obstacles(self):
         observation_space = self.create_test_observation_space()
         extractor = LSTMExtractor(
-            observation_space, max_obstacles=3, lstm_hidden=32, bidirectional=False
+            observation_space,
+            max_obstacles=3,
+            lstm_hidden=32,
+            bidirectional=False,
         )
 
         obs = self.create_test_observations(batch_size=2, max_obstacles=3)
-        # 절반만 유효
         obs["mask"] = torch.tensor([[1, 0, 1], [0, 1, 0]], dtype=torch.float32)
 
         out = extractor.forward(obs)
@@ -229,15 +229,16 @@ class TestLSTMExtractor:
 
     def test_forward_all_obstacles_masked(self):
         observation_space = self.create_test_observation_space()
-        extractor = LSTMExtractor(observation_space, max_obstacles=3, lstm_hidden=32)
+        extractor = LSTMExtractor(
+            observation_space, max_obstacles=3, lstm_hidden=32
+        )
 
         obs = self.create_test_observations(batch_size=2, max_obstacles=3)
-        obs["mask"] = torch.zeros(2, 3)  # 전부 마스킹
+        obs["mask"] = torch.zeros(2, 3)
 
         out = extractor.forward(obs)
         assert out.shape[0] == 2
         assert torch.all(torch.isfinite(out))
-
 
     def test_lstm_output_projection(self):
         """Test that LSTM output is properly projected back to obstacle feature size."""
@@ -265,10 +266,11 @@ class TestLSTMExtractor:
         obstacle_features = result[:, obstacle_start:].reshape(1, 3, 4)
         assert obstacle_features.shape == (1, 3, 4)
 
-    # tests/test_lstm_extractor.py
     def test_gradient_flow(self):
         observation_space = self.create_test_observation_space()
-        extractor = LSTMExtractor(observation_space, max_obstacles=3, lstm_hidden=32)
+        extractor = LSTMExtractor(
+            observation_space, max_obstacles=3, lstm_hidden=32
+        )
 
         obs = self.create_test_observations(batch_size=2, max_obstacles=3)
         for k in ("agent", "obstacles", "target"):
@@ -277,15 +279,16 @@ class TestLSTMExtractor:
         out = extractor.forward(obs)
         loss = out.sum()
         loss.backward()
-        print(obs["obstacles"])
 
         for k in ("agent", "obstacles", "target"):
-            # print(obs[k].grad)
             assert obs[k].grad is not None
             assert torch.any(obs[k].grad != 0)
 
-        assert any(p.grad is not None for p in extractor.parameters() if p.requires_grad)
-
+        assert any(
+            p.grad is not None
+            for p in extractor.parameters()
+            if p.requires_grad
+        )
 
     def test_deterministic_output(self):
         """Test that output is deterministic for same input."""

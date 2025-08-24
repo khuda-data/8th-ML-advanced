@@ -14,7 +14,6 @@ from ..utils import (
     extract_agent_features,
     extract_target_relative_features,
     extract_obstacle_relative_features,
-    extract_obstacle_relative_features_vectorized,
     flatten_obstacle_features,
     get_feature_dimensions,
     validate_observation_tensors,
@@ -213,50 +212,6 @@ class TestExtractObstacleRelativeFeatures:
 
         assert result.shape == (1, 3, 4)
         torch.testing.assert_close(result, torch.zeros(1, 3, 4))
-
-
-class TestExtractObstacleRelativeFeaturesVectorized:
-    """Test suite for vectorized obstacle feature extraction."""
-
-    def test_vectorized_matches_loop_version(self):
-        """Test that vectorized version produces same results as loop version."""
-        batch_size = 3
-        max_obstacles = 4
-
-        agent_data = torch.randn(batch_size, 7)
-        obstacles_data = torch.randn(batch_size, max_obstacles, 7)
-        mask = torch.randint(0, 2, (batch_size, max_obstacles)).float()
-
-        result_loop = extract_obstacle_relative_features(
-            agent_data, obstacles_data, mask, include_acceleration=False
-        )
-        result_vectorized = extract_obstacle_relative_features_vectorized(
-            agent_data, obstacles_data, mask, include_acceleration=False
-        )
-
-        torch.testing.assert_close(
-            result_loop, result_vectorized, rtol=1e-5, atol=1e-6
-        )
-
-    def test_vectorized_with_acceleration(self):
-        """Test vectorized version with acceleration features."""
-        batch_size = 2
-        max_obstacles = 3
-
-        agent_data = torch.randn(batch_size, 7)
-        obstacles_data = torch.randn(batch_size, max_obstacles, 7)
-        mask = torch.ones(batch_size, max_obstacles)
-
-        result_loop = extract_obstacle_relative_features(
-            agent_data, obstacles_data, mask, include_acceleration=True
-        )
-        result_vectorized = extract_obstacle_relative_features_vectorized(
-            agent_data, obstacles_data, mask, include_acceleration=True
-        )
-
-        torch.testing.assert_close(
-            result_loop, result_vectorized, rtol=1e-5, atol=1e-6
-        )
 
 
 class TestFlattenObstacleFeatures:
