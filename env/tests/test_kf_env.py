@@ -1,6 +1,5 @@
 """Unit tests for KFEnv class"""
 
-import pytest
 import numpy as np
 import gymnasium as gym
 from env.kf_env import KFEnv

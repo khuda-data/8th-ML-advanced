@@ -4,22 +4,49 @@ from typing import Dict
 from gymnasium import spaces
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
+from .utils import (
+    extract_agent_features,
+    extract_target_relative_features,
+    extract_obstacle_relative_features_vectorized,
+    flatten_obstacle_features,
+    get_feature_dimensions,
+    validate_observation_tensors,
+    compute_sequence_lengths_from_mask,
+)
+
 
 class LSTMExtractor(BaseFeaturesExtractor):
     """
-    LSTM-based feature extractor compatible with SB3.
-    Input keys and semantics follow padding_extractor.py:
-      - observations["agent"]: [batch_size, 7] - [radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y]
-      - observations["obstacles"]: [batch_size, max_obstacles, 7] - each obstacle [radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y]
-      - observations["target"]: [batch_size, 2] - [pos_x, pos_y]
-      - observations["mask"]: [batch_size, max_obstacles] - 1 if obstacle valid, else 0
+    Feature extractor using LSTM to process obstacle sequences.
 
-    Internally computes relative obstacle features (agent-centered):
-      - without acceleration: [rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y]
-      - with acceleration: [rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y, acc_x, acc_y]
+    This extractor uses LSTM (Long Short-Term Memory) networks to process
+    obstacle features as sequences, allowing the model to capture temporal
+    or spatial dependencies between obstacles. Unlike attention mechanisms
+    that process all obstacles simultaneously, LSTM processes obstacles
+    sequentially, which can be beneficial for capturing ordering relationships.
 
-    Output shape matches padding_extractor.py:
-      [batch_size, agent_features + target_features + max_obstacles * obstacle_feature_size]
+    The LSTM processes relative obstacle features and outputs a processed
+    representation for each obstacle, which is then flattened and concatenated
+    with agent and target features. This approach is particularly useful when:
+    - Obstacle ordering matters (e.g., obstacles encountered in sequence)
+    - Sequential dependencies between obstacles exist
+    - A smaller model size is preferred compared to attention
+
+    Architecture:
+    1. Extract relative obstacle features
+    2. Pack sequences to handle variable obstacle counts efficiently
+    3. Process through LSTM layers with optional bidirectionality
+    4. Unpack and project back to original feature space
+    5. Flatten and concatenate with agent/target features
+
+    Args:
+        observation_space: The observation space from the Gymnasium environment
+        max_obstacles: Maximum number of obstacles (default: 10)
+        include_acceleration: Whether to include acceleration features (default: False)
+        lstm_hidden: Hidden size of LSTM layers (default: 128)
+        lstm_layers: Number of LSTM layers (default: 1)
+        bidirectional: Whether to use bidirectional LSTM (default: False)
+        use_layernorm: Whether to apply layer normalization (default: True)
     """
 
     def __init__(
@@ -33,15 +60,17 @@ class LSTMExtractor(BaseFeaturesExtractor):
         bidirectional: bool = False,
         use_layernorm: bool = True,
     ) -> None:
-        # same feature sizing rules as padding_extractor
-        self.max_obstacles = max_obstacles
-        self.include_acceleration = include_acceleration
-        self._agent_size = (
-            4 if include_acceleration else 2
-        )  # [vel_x, vel_y] or [vel_x, vel_y, acc_x, acc_y]
-        self._target_size = 2  # [pos_x, pos_y]
-        self._obstacle_size = 6 if include_acceleration else 4
-        self._obstacles_total_size = self._obstacle_size * max_obstacles
+        self._max_obstacles = max_obstacles
+        self._include_acceleration = include_acceleration
+
+        # Get standard feature dimensions
+        (
+            self._agent_size,
+            self._target_size,
+            self._obstacle_size,
+            self._obstacles_total_size,
+        ) = get_feature_dimensions(max_obstacles, include_acceleration)
+
         out_dim = (
             self._agent_size + self._target_size + self._obstacles_total_size
         )
@@ -49,7 +78,7 @@ class LSTMExtractor(BaseFeaturesExtractor):
         super().__init__(observation_space, out_dim)
 
         # LSTM processes per-obstacle relative features [rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y, (acc_x, acc_y)]
-        self.lstm = nn.LSTM(
+        self._lstm = nn.LSTM(
             input_size=self._obstacle_size,
             hidden_size=lstm_hidden,
             num_layers=lstm_layers,
@@ -59,102 +88,76 @@ class LSTMExtractor(BaseFeaturesExtractor):
         lstm_out_dim = lstm_hidden * (2 if bidirectional else 1)
 
         # Project LSTM output back to per-obstacle feature size to maintain compatibility
-        self.per_step_head = nn.Linear(lstm_out_dim, self._obstacle_size)
+        self._per_step_head = nn.Linear(lstm_out_dim, self._obstacle_size)
 
         # Optional post-processing normalization
-        self.post = nn.LayerNorm(out_dim) if use_layernorm else nn.Identity()
-        self.features_dim = out_dim
-
-    @torch.no_grad()
-    def _lengths_from_mask(self, mask: torch.Tensor) -> torch.Tensor:
-        """
-        Compute valid sequence lengths from mask [batch_size, max_obstacles].
-        Ensures minimum length of 1 to avoid empty sequence issues.
-        """
-        if mask.dtype.is_floating_point:
-            lengths = (mask > 0.5).sum(dim=1)
-        else:
-            lengths = mask.long().sum(dim=1)
-        return lengths.clamp(min=1)
-
-    def _build_relative_obstacle_feats(
-        self,
-        agent_data: torch.Tensor,  # [batch_size, 7] - [radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y]
-        obstacles_data: torch.Tensor,  # [batch_size, max_obstacles, 7]
-        mask: torch.Tensor,  # [batch_size, max_obstacles]
-    ) -> torch.Tensor:
-        """
-        Compute per-obstacle relative features with respect to agent.
-        Returns [batch_size, max_obstacles, obstacle_feature_size], masked where invalid.
-        """
-        agent_pos = agent_data[:, [1, 2]].unsqueeze(1)  # [pos_x, pos_y]
-        agent_vel = agent_data[:, [3, 4]].unsqueeze(1)  # [vel_x, vel_y]
-        obs_pos = obstacles_data[:, :, [1, 2]]  # [pos_x, pos_y]
-        obs_vel = obstacles_data[:, :, [3, 4]]  # [vel_x, vel_y]
-
-        rel_pos = obs_pos - agent_pos  # [rel_pos_x, rel_pos_y]
-        rel_vel = obs_vel - agent_vel  # [rel_vel_x, rel_vel_y]
-
-        if self.include_acceleration:
-            obs_acc = obstacles_data[:, :, [5, 6]]  # [acc_x, acc_y]
-            feats = torch.cat([rel_pos, rel_vel, obs_acc], dim=-1)
-        else:
-            feats = torch.cat([rel_pos, rel_vel], dim=-1)
-
-        valid_mask = (mask > 0.5).float().unsqueeze(-1)
-        return feats * valid_mask
+        self._post = nn.LayerNorm(out_dim) if use_layernorm else nn.Identity()
+        self._features_dim = out_dim
 
     def forward(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:
         """
-        Forward pass returning [batch_size, features_dim].
+        Extract features using LSTM processing of obstacle sequences.
+
+        This method processes observations by treating obstacles as a sequence
+        and applying LSTM to capture dependencies between them. The LSTM output
+        is projected back to obstacle feature space and then concatenated with
+        agent and target features for final processing.
+
+        The key advantage of this approach is that it can capture sequential
+        relationships between obstacles while handling variable sequence lengths
+        efficiently through packed sequences.
+
+        Args:
+            observations: Dictionary containing:
+                - "agent": Tensor [batch_size, 7] with agent state
+                - "obstacles": Tensor [batch_size, max_obstacles, 7] with obstacle states
+                - "target": Tensor [batch_size, 2] with target position
+                - "mask": Tensor [batch_size, max_obstacles] with obstacle validity
+
+        Returns:
+            Tensor of shape [batch_size, out_dim] containing concatenated features:
+            [agent_features, target_features, lstm_processed_obstacle_features]
         """
-        agent_data = observations[
-            "agent"
-        ]  # [radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y]
-        obstacles_data = observations[
-            "obstacles"
-        ]  # [radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y] per obstacle
-        target_data = observations["target"]  # [pos_x, pos_y]
-        mask = observations["mask"]  # obstacle validity mask
+        agent_data = observations["agent"]
+        obstacles_data = observations["obstacles"]
+        target_data = observations["target"]
+        mask = observations["mask"]
 
-        # agent velocity (+acceleration if enabled)
-        if self.include_acceleration:
-            agent_features = agent_data[
-                :, [3, 4, 5, 6]
-            ]  # [vel_x, vel_y, acc_x, acc_y]
-        else:
-            agent_features = agent_data[:, [3, 4]]  # [vel_x, vel_y]
-
-        target_features = target_data  # [pos_x, pos_y]
-
-        # relative obstacle features [rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y,(acc_x, acc_y)]
-        rel_feats = self._build_relative_obstacle_feats(
-            agent_data, obstacles_data, mask
+        validate_observation_tensors(
+            agent_data, obstacles_data, target_data, mask, self._max_obstacles
         )
 
-        # pack valid sequences for LSTM
-        lengths = self._lengths_from_mask(mask)
+        agent_features = extract_agent_features(
+            agent_data, self._include_acceleration
+        )
+
+        target_features = extract_target_relative_features(
+            agent_data, target_data
+        )
+
+        rel_feats = extract_obstacle_relative_features_vectorized(
+            agent_data, obstacles_data, mask, self._include_acceleration
+        )
+
+        lengths = compute_sequence_lengths_from_mask(mask)
         packed = nn.utils.rnn.pack_padded_sequence(
             rel_feats, lengths.cpu(), batch_first=True, enforce_sorted=False
         )
-        packed_out, _ = self.lstm(packed)
+        packed_out, _ = self._lstm(packed)
         lstm_out, _ = nn.utils.rnn.pad_packed_sequence(
-            packed_out, batch_first=True, total_length=self.max_obstacles
+            packed_out, batch_first=True, total_length=self._max_obstacles
         )
 
-        # project each obstacle timestep back to obstacle_feature_size
-        per_step = self.per_step_head(lstm_out)
+        per_step = self._per_step_head(lstm_out)
         valid_mask = (mask > 0.5).float().unsqueeze(-1)
         per_step = per_step * valid_mask
 
-        # flatten obstacle features
-        obstacles_flat = per_step.reshape(
-            agent_data.shape[0], self._obstacles_total_size
+        obstacles_flat = flatten_obstacle_features(
+            per_step, self._max_obstacles, self._obstacle_size
         )
 
-        # concatenate agent, target, and obstacle features
         features = torch.cat(
             [agent_features, target_features, obstacles_flat], dim=1
         )
 
-        return self.post(features)
+        return self._post(features)

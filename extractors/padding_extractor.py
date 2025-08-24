@@ -3,26 +3,51 @@ from typing import Dict
 from gymnasium import spaces
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
+from .utils import (
+    extract_agent_features,
+    extract_target_relative_features,
+    extract_obstacle_relative_features_vectorized,
+    flatten_obstacle_features,
+    get_feature_dimensions,
+    validate_observation_tensors,
+)
+
 
 class PaddingExtractor(BaseFeaturesExtractor):
+    """
+    A simple feature extractor that concatenates all features into a single vector.
+
+    This extractor implements the most straightforward approach to feature extraction
+    by flattening all obstacle features and concatenating them with agent and target
+    features. It's called "padding" because it handles variable numbers of obstacles
+    by padding shorter sequences to a fixed maximum length.
+
+    The extracted features are organized as:
+    [agent_features, target_features, obstacle1_features, obstacle2_features, ...]
+
+    This approach is simple and works well when the number of obstacles is relatively
+    small and consistent, but may not scale well to environments with many obstacles
+    or highly variable obstacle counts.
+
+    Args:
+        observation_space: The observation space from the Gymnasium environment
+        max_obstacles: Maximum number of obstacles that can be present (default: 10)
+        include_acceleration: Whether to include acceleration in features (default: False)
+    """
+
     def __init__(self, observation_space: spaces.Dict, **kwargs):
-        self.max_obstacles = kwargs.get("max_obstacles", 10)
-        self.include_acceleration = kwargs.get("include_acceleration", False)
+        self._max_obstacles = kwargs.get("max_obstacles", 10)
+        self._include_acceleration = kwargs.get("include_acceleration", False)
 
-        # Agent features: absolute velocity + absolute acceleration (optional)
-        self._agent_size = (
-            4 if self.include_acceleration else 2
-        )  # [vel_x, vel_y] or [vel_x, vel_y, acc_x, acc_y]
+        (
+            self._agent_size,
+            self._target_size,
+            self._obstacle_size,
+            self._obstacles_total_size,
+        ) = get_feature_dimensions(
+            self._max_obstacles, self._include_acceleration
+        )
 
-        # Target features: position only
-        self._target_size = 2  # [pos_x, pos_y]
-
-        # Obstacle features: relative position + relative velocity + absolute acceleration (optional)
-        self._obstacle_size = (
-            5 if self.include_acceleration else 4
-        )  # [rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y] or [..., acc_x, acc_y]
-
-        self._obstacles_total_size = self._obstacle_size * self.max_obstacles
         self._features_dim = (
             self._agent_size + self._target_size + self._obstacles_total_size
         )
@@ -30,88 +55,51 @@ class PaddingExtractor(BaseFeaturesExtractor):
         super().__init__(observation_space, self._features_dim)
 
     def forward(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:
-        agent_data = observations[
-            "agent"
-        ]  # [batch_size, 7] - [radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y]
-        obstacles_data = observations[
-            "obstacles"
-        ]  # [batch_size, max_obstacles, 7]
-        target_data = observations["target"]  # [batch_size, 2] - [pos_x, pos_y]
-        mask = observations[
-            "mask"
-        ]  # [batch_size, max_obstacles] - obstacle validity mask
+        """
+        Extract and concatenate all features into a single vector.
 
-        # Extract agent features (absolute velocity + optional acceleration)
-        if self.include_acceleration:
-            agent_features = agent_data[
-                :, [3, 4, 5, 6]
-            ]  # [vel_x, vel_y, acc_x, acc_y]
-        else:
-            agent_features = agent_data[:, [3, 4]]  # [vel_x, vel_y]
+        This method processes the input observations by extracting agent-relative
+        features and concatenating them into a single feature vector. All obstacles
+        are flattened into a single sequence, making this suitable for fully
+        connected layers but not for attention or sequence-based processing.
 
-        # Target features (position only)
-        target_features = target_data  # [pos_x, pos_y]
+        Args:
+            observations: Dictionary containing:
+                - "agent": Tensor [batch_size, 7] with agent state
+                - "obstacles": Tensor [batch_size, max_obstacles, 7] with obstacle states
+                - "target": Tensor [batch_size, 2] with target position
+                - "mask": Tensor [batch_size, max_obstacles] with obstacle validity
 
-        # Extract obstacle features (relative position + relative velocity + optional acceleration)
-        obstacles_features = self._encode_obstacles_relative(
-            agent_data, obstacles_data, mask
+        Returns:
+            Tensor of shape [batch_size, features_dim] containing the concatenated
+            features: [agent_features, target_features, flattened_obstacle_features]
+        """
+        agent_data = observations["agent"]
+        obstacles_data = observations["obstacles"]
+        target_data = observations["target"]
+        mask = observations["mask"]
+
+        validate_observation_tensors(
+            agent_data, obstacles_data, target_data, mask, self._max_obstacles
         )
 
-        # Concatenate all features
+        agent_features = extract_agent_features(
+            agent_data, self._include_acceleration
+        )
+
+        target_features = extract_target_relative_features(
+            agent_data, target_data
+        )
+
+        obstacle_features = extract_obstacle_relative_features_vectorized(
+            agent_data, obstacles_data, mask, self._include_acceleration
+        )
+
+        obstacles_flat = flatten_obstacle_features(
+            obstacle_features, self._max_obstacles, self._obstacle_size
+        )
+
         features = torch.cat(
-            [agent_features, target_features, obstacles_features], dim=1
+            [agent_features, target_features, obstacles_flat], dim=1
         )
         return features
-
-    def _encode_obstacles_relative(
-        self,
-        agent_data: torch.Tensor,
-        obstacles_data: torch.Tensor,
-        mask: torch.Tensor,
-    ) -> torch.Tensor:
-        batch_size = agent_data.shape[0]
-
-        # Initialize output tensor
-        output = torch.zeros(
-            batch_size, self._obstacles_total_size, device=agent_data.device
-        )
-
-        # Agent position and velocity for relative calculations
-        agent_pos = agent_data[:, [1, 2]]  # [pos_x, pos_y]
-        agent_vel = agent_data[:, [3, 4]]  # [vel_x, vel_y]
-
-        for i in range(self.max_obstacles):
-            obstacle = obstacles_data[:, i]  # [batch_size, 7]
-            obstacle_mask = mask[
-                :, i
-            ]  # [batch_size] - validity mask for this obstacle
-
-            # Use mask to determine valid obstacles
-            valid_mask = obstacle_mask > 0  # True where obstacle is valid
-
-            if valid_mask.any():
-                # Relative position
-                obstacle_pos = obstacle[:, [1, 2]]  # [pos_x, pos_y]
-                rel_pos = obstacle_pos - agent_pos
-
-                # Relative velocity
-                obstacle_vel = obstacle[:, [3, 4]]  # [vel_x, vel_y]
-                rel_vel = obstacle_vel - agent_vel
-
-                start_idx = i * self._obstacle_size
-
-                if self.include_acceleration:
-                    # [rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y, acc_x, acc_y]
-                    obstacle_acc = obstacle[:, [5, 6]]  # [acc_x, acc_y]
-                    features = torch.cat(
-                        [rel_pos, rel_vel, obstacle_acc], dim=1
-                    )
-                else:
-                    # [rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y]
-                    features = torch.cat([rel_pos, rel_vel], dim=1)
-
-                output[:, start_idx : start_idx + self._obstacle_size] = (
-                    features * valid_mask.unsqueeze(1)
-                )
-
-        return output
