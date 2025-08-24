@@ -90,7 +90,7 @@ class Entity:
 
     def update(self, dt: float):
         current_velocity = self.get_velocity()
-        # Calculate acceleration based on velocity change
+
         self.acceleration = Vector2(
             (
                 (current_velocity.x - self.previous_velocity.x) / dt

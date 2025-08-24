@@ -125,10 +125,3 @@ class TestEntity:
         distance = entity1.get_position().distance_to(entity2.get_position())
 
         assert abs(distance - 5.0) < 0.001
-
-    # def test_render_without_screen(self):
-    #     """Test render method without screen (should not crash)"""
-    #     entity = Entity()
-
-    #     # Should not raise exceptions when screen is None
-    #     entity.render(None, 1.0, Vector2(0, 0))

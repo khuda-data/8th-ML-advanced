@@ -3,7 +3,6 @@
 import numpy as np
 from pygame import Vector2
 from ..stable_obstacle import StableObstacle
-from ...types import CollisionType
 
 
 class TestStableObstacle:
@@ -22,9 +21,7 @@ class TestStableObstacle:
     def test_init_custom_values(self):
         """Test obstacle initialization with custom values"""
         position = Vector2(10.0, 5.0)
-        obstacle = StableObstacle(
-            radius=0.5, mass=2.0, speed=5.0
-        )
+        obstacle = StableObstacle(radius=0.5, mass=2.0, speed=5.0)
         obstacle.set_position(position)
 
         assert obstacle.radius == 0.5
@@ -47,25 +44,6 @@ class TestStableObstacle:
         current_speed = np.sqrt(velocity.x**2 + velocity.y**2)
 
         assert abs(current_speed - 3.0) < 0.01
-
-    # def test_speed_correction_when_disturbed(self):
-    #     """Test speed correction when velocity is disturbed"""
-    #     position = Vector2(0.0, 0.0)
-    #     obstacle = StableObstacle(speed=4.0)
-    #     obstacle.set_position(position)
-
-    #     # Set velocity with wrong speed
-    #     obstacle.set_velocity(Vector2(8.0, 0.0))  # Speed = 8.0, should be 4.0
-
-    #     obstacle.update(0.016)
-
-    #     velocity = obstacle.get_velocity()
-    #     current_speed = np.sqrt(velocity.x**2 + velocity.y**2)
-
-    #     assert abs(current_speed - 4.0) < 0.01
-
-    # 해당 테스트 코드는 Collision 구현으로 인해 사라진 update method 때문에 제대로 동작할 수 없음.
-    # 따라서, 테스트 코드 삭제.
 
     def test_zero_velocity_handling(self):
         """Test behavior when velocity is zero"""
