@@ -1,11 +1,11 @@
 from typing import List, Type
 import torch.nn as nn
 from gymnasium import spaces
-from stable_baselines3.sac.policies import Critic
+from stable_baselines3.common.policies import ContinuousCritic
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 
-class KFCritic(Critic):
+class KFCritic(ContinuousCritic):
     def __init__(
         self,
         observation_space: spaces.Space,

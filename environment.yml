@@ -11,6 +11,9 @@ dependencies:
   - torchvision
   - torchaudio
 
+  - tensorboard
+  - moviepy
+
   - stable-baselines3
 
   - gymnasium
