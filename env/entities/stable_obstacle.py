@@ -15,17 +15,17 @@ class StableObstacle(Entity):
         mass: float = 1.0,
         speed: float = 2.0,
     ):
+        # self.speed를 super().__init__() 호출보다 먼저 정의합니다.
         self.speed = speed
 
+        # 이제 부모 클래스의 생성자를 호출합니다.
+        # 부모 생성자 내부에서 reset()이 호출될 때 self.speed가 존재하게 됩니다.
         super().__init__(
             radius=radius,
             mass=mass,
             color=(255, 100, 100),
             collision_type=CollisionType.OBSTACLE,
         )
-
-    def update(self, dt: float):
-        super().update(dt)
 
     def reset(self):
         super().reset()

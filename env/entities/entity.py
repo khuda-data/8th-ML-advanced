@@ -73,7 +73,7 @@ class Entity:
         self.body.apply_impulse_at_local_point((impulse.x, impulse.y), (0, 0))
 
     def render(
-        self, screen: pygame.Surface, scale: float, offset: float
+        self, screen: pygame.Surface, scale: float, offset: Vector2
     ) -> None:
         """Render entity on pygame screen with scaling and offset"""
         pos = self.get_position()
@@ -90,7 +90,7 @@ class Entity:
 
     def update(self, dt: float):
         current_velocity = self.get_velocity()
-
+        # Calculate acceleration based on velocity change
         self.acceleration = Vector2(
             (
                 (current_velocity.x - self.previous_velocity.x) / dt
@@ -107,6 +107,7 @@ class Entity:
         self.previous_velocity = current_velocity
 
     def unset_space(self):
+        """Remove this entity from its physics space"""
         if self.space is not None and self.body in self.space.bodies:
             self.space.remove(self.body, self.shape)
             self.space = None

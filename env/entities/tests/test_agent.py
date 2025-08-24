@@ -71,7 +71,8 @@ class TestAgent:
 
     def test_velocity_limit(self):
         """Test velocity limiting functionality"""
-        agent = Agent(max_velocity=5.0)
+        agent = Agent()
+        agent.max_velocity = 5.0
 
         # Set velocity exceeding max_velocity
         agent.set_velocity(Vector2(10.0, 0.0))
@@ -84,7 +85,8 @@ class TestAgent:
 
     def test_update_with_velocity_constraint(self):
         """Test update method with velocity constraint"""
-        agent = Agent(max_velocity=8.0)
+        agent = Agent()
+        agent.max_velocity = 8.0
         agent.set_velocity(Vector2(15.0, 0.0))  # Exceeds max_velocity
 
         agent.update(0.016)
@@ -96,7 +98,7 @@ class TestAgent:
 
     def test_update_normal_velocity(self):
         """Test update with normal velocity (no clamping)"""
-        agent = Agent(max_velocity=10.0)
+        agent = Agent()
         agent.set_velocity(Vector2(3.0, 4.0))  # Speed = 5.0, within limit
 
         initial_velocity = agent.get_velocity()
