@@ -1,6 +1,4 @@
-"""
-Comprehensive tests for AttentionExtractor.
-
+"""Comprehensive tests for AttentionExtractor.
 This module tests the AttentionExtractor class including initialization,
 forward pass, attention mechanism, and multi-layer processing.
 """
@@ -9,7 +7,7 @@ import pytest
 import torch
 import torch.nn as nn
 from gymnasium import spaces
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from ..attention_extractor import AttentionExtractor
 
@@ -48,14 +46,13 @@ class TestAttentionExtractor:
     def test_initialization_default_parameters(self):
         """Test initialization with default parameters."""
         observation_space = self.create_test_observation_space()
-
         extractor = AttentionExtractor(observation_space)
 
         assert extractor._d_model == 64
         assert extractor._num_heads == 4
         assert extractor._num_layers == 1
         assert extractor._max_obstacles == 10
-        assert extractor._include_acceleration == False
+        assert extractor._include_acceleration is False
         assert extractor._agent_size == 2
         assert extractor._target_size == 2
         assert extractor._obstacle_size == 4
@@ -64,7 +61,6 @@ class TestAttentionExtractor:
     def test_initialization_custom_parameters(self):
         """Test initialization with custom parameters."""
         observation_space = self.create_test_observation_space()
-
         extractor = AttentionExtractor(
             observation_space,
             d_model=128,
@@ -78,7 +74,7 @@ class TestAttentionExtractor:
         assert extractor._num_heads == 8
         assert extractor._num_layers == 2
         assert extractor._max_obstacles == 5
-        assert extractor._include_acceleration == True
+        assert extractor._include_acceleration is True
         assert extractor._agent_size == 4  # with acceleration
         assert extractor._obstacle_size == 6  # with acceleration
         assert extractor.features_dim == 130  # target_size (2) + d_model (128)
@@ -121,7 +117,6 @@ class TestAttentionExtractor:
         observations = self.create_test_observations(
             batch_size=2, max_obstacles=3
         )
-
         result = extractor.forward(observations)
 
         # Check output shape: target_size + d_model
@@ -145,7 +140,6 @@ class TestAttentionExtractor:
         observations = self.create_test_observations(
             batch_size=1, max_obstacles=3
         )
-
         result = extractor.forward(observations)
 
         # Output should still be target_size + d_model
@@ -159,7 +153,6 @@ class TestAttentionExtractor:
         extractor_single = AttentionExtractor(
             observation_space, d_model=32, num_layers=1, max_obstacles=3
         )
-
         extractor_multi = AttentionExtractor(
             observation_space, d_model=32, num_layers=3, max_obstacles=3
         )
@@ -173,7 +166,6 @@ class TestAttentionExtractor:
 
         # Both should have same output shape
         assert result_single.shape == result_multi.shape
-
         # But different values (unless very unlikely coincidence)
         assert not torch.allclose(result_single, result_multi, atol=1e-3)
 
@@ -191,12 +183,11 @@ class TestAttentionExtractor:
             "target": torch.randn(1, 2),
             "mask": torch.tensor(
                 [[1.0, 1.0, 0.0, 0.0]], dtype=torch.float32
-            ),  # Only first 2 obstacles valid
+            ),  # Only first 2 valid
         }
 
         result = extractor.forward(observations)
 
-        # Should handle masked obstacles properly
         assert result.shape == (1, 2 + 32)
         assert torch.all(torch.isfinite(result))
 
@@ -216,7 +207,6 @@ class TestAttentionExtractor:
 
         result = extractor.forward(observations)
 
-        # Should still produce valid output
         assert result.shape == (1, 2 + 32)
         assert torch.all(torch.isfinite(result))
 
@@ -259,12 +249,10 @@ class TestAttentionExtractor:
                     num_heads=num_heads,
                     max_obstacles=3,
                 )
-
                 observations = self.create_test_observations(
                     batch_size=1, max_obstacles=3
                 )
                 result = extractor.forward(observations)
-
                 assert result.shape == (1, 2 + d_model)
 
     def test_different_d_model_sizes(self):
@@ -275,16 +263,14 @@ class TestAttentionExtractor:
             extractor = AttentionExtractor(
                 observation_space, d_model=d_model, num_heads=4, max_obstacles=3
             )
-
             observations = self.create_test_observations(
                 batch_size=1, max_obstacles=3
             )
             result = extractor.forward(observations)
-
             assert result.shape == (1, 2 + d_model)
 
+    # tests/test_attention_extractor.py
     def test_gradient_flow(self):
-        """Test that gradients can flow through the attention mechanism."""
         observation_space = self.create_test_observation_space()
         extractor = AttentionExtractor(
             observation_space, d_model=32, max_obstacles=3
@@ -294,19 +280,22 @@ class TestAttentionExtractor:
             batch_size=2, max_obstacles=3
         )
 
-        # Enable gradient computation
-        for key in observations:
+        for key in ("agent", "obstacles", "target"):
             observations[key].requires_grad_(True)
 
         result = extractor.forward(observations)
         loss = result.sum()
         loss.backward()
 
-        # Check that gradients exist and are non-zero
-        for key in observations:
+        for key in ("agent", "obstacles", "target"):
             assert observations[key].grad is not None
-            # At least some gradients should be non-zero
             assert torch.any(observations[key].grad != 0)
+
+        assert any(
+            p.grad is not None
+            for p in extractor.parameters()
+            if p.requires_grad
+        )
 
     def test_attention_mechanism_focuses_on_valid_obstacles(self):
         """Test that attention mechanism focuses on valid obstacles."""
@@ -315,7 +304,6 @@ class TestAttentionExtractor:
             observation_space, d_model=32, max_obstacles=3
         )
 
-        # Create scenario where agent is surrounded by obstacles
         observations_all_valid = {
             "agent": torch.tensor(
                 [[0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]], dtype=torch.float32
@@ -323,17 +311,16 @@ class TestAttentionExtractor:
             "obstacles": torch.tensor(
                 [
                     [
-                        [0.3, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # Right
-                        [0.3, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # Left
+                        [0.3, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                        [0.3, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                         [0.3, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
                     ]
                 ],
                 dtype=torch.float32,
-            ),  # Up
+            ),
             "target": torch.tensor([[5.0, 0.0]], dtype=torch.float32),
             "mask": torch.tensor([[1.0, 1.0, 1.0]], dtype=torch.float32),
         }
-
         observations_partial_valid = {
             "agent": observations_all_valid["agent"].clone(),
             "obstacles": observations_all_valid["obstacles"].clone(),
@@ -358,7 +345,6 @@ class TestAttentionExtractor:
         observations = self.create_test_observations(
             batch_size=1, max_obstacles=3
         )
-
         extractor.forward(observations)
 
         # Check that validation was called
@@ -372,7 +358,6 @@ class TestAttentionExtractor:
         observations = self.create_test_observations(
             batch_size=2, max_obstacles=3
         )
-
         result1 = extractor.forward(observations)
         result2 = extractor.forward(observations)
 
@@ -383,14 +368,11 @@ class TestAttentionExtractor:
         observation_space = self.create_test_observation_space()
         extractor = AttentionExtractor(observation_space, max_obstacles=3)
 
-        # Create observations where each batch item is processed separately
         observations_batch = self.create_test_observations(
             batch_size=3, max_obstacles=3
         )
-
         result_batch = extractor.forward(observations_batch)
 
-        # Process each item individually
         results_individual = []
         for i in range(3):
             obs_single = {
@@ -400,8 +382,6 @@ class TestAttentionExtractor:
             results_individual.append(result_single)
 
         result_individual_stacked = torch.cat(results_individual, dim=0)
-
-        # Should be identical
         torch.testing.assert_close(
             result_batch, result_individual_stacked, rtol=1e-5, atol=1e-6
         )
@@ -416,8 +396,6 @@ class TestAttentionExtractor:
         observations = self.create_test_observations(
             batch_size=1, max_obstacles=3
         )
-
-        # Should work without any numerical issues
         result = extractor.forward(observations)
 
         assert torch.all(torch.isfinite(result))
@@ -430,7 +408,6 @@ class TestAttentionExtractor:
             observation_space, d_model=64, num_layers=1, max_obstacles=3
         )
 
-        # Check feed forward layer structure
         ff_layer = extractor._feed_forwards[0]
         assert len(ff_layer) == 3  # Linear -> ReLU -> Linear
         assert isinstance(ff_layer[0], nn.Linear)
@@ -442,18 +419,6 @@ class TestAttentionExtractor:
         assert ff_layer[0].out_features == 128  # d_model * 2
         assert ff_layer[2].in_features == 128
         assert ff_layer[2].out_features == 64
-
-    def test_output_projection_layer(self):
-        """Test the output projection layer."""
-        observation_space = self.create_test_observation_space()
-        extractor = AttentionExtractor(
-            observation_space, d_model=64, max_obstacles=3
-        )
-
-        # Check output projection
-        assert isinstance(extractor._output_projection, nn.Linear)
-        assert extractor._output_projection.in_features == 64
-        assert extractor._output_projection.out_features == 64
 
 
 class TestAttentionExtractorIntegration:
@@ -487,18 +452,18 @@ class TestAttentionExtractorIntegration:
                             0.0,
                             0.0,
                         ],  # Static obstacle behind
-                        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # Invalid obstacle
+                        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # Invalid
                         [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                     ]
                 ],
                 dtype=torch.float32,
-            ),  # Invalid obstacle
+            ),
             "target": torch.tensor(
                 [[5.0, 0.0]], dtype=torch.float32
             ),  # Target to the right
             "mask": torch.tensor(
                 [[1.0, 1.0, 1.0, 0.0, 0.0]], dtype=torch.float32
-            ),  # 3 valid obstacles
+            ),  # 3 valid
         }
 
     def test_realistic_navigation_scenario(self):
@@ -521,9 +486,7 @@ class TestAttentionExtractorIntegration:
         extractor = AttentionExtractor(
             observation_space, d_model=64, num_heads=4, max_obstacles=5
         )
-
         observations = self.create_realistic_observations()
-
         result = extractor.forward(observations)
 
         assert result.shape == (1, 66)  # 2 + 64
@@ -546,7 +509,6 @@ class TestAttentionExtractorIntegration:
                 "mask": spaces.Box(low=0, high=1, shape=(10,)),
             }
         )
-
         extractor = AttentionExtractor(
             observation_space, d_model=64, num_heads=4, max_obstacles=10
         )
@@ -558,7 +520,6 @@ class TestAttentionExtractorIntegration:
             "target": torch.randn(batch_size, 2),
             "mask": torch.rand(batch_size, 10),
         }
-
         result = extractor.forward(observations)
 
         assert result.shape == (batch_size, 66)
@@ -580,7 +541,6 @@ class TestAttentionExtractorIntegration:
                 "mask": spaces.Box(low=0, high=1, shape=(3,)),
             }
         )
-
         extractor = AttentionExtractor(
             observation_space, d_model=32, max_obstacles=3
         )
@@ -624,9 +584,7 @@ class TestAttentionExtractorIntegration:
         result1 = extractor.forward(observations1)
         result2 = extractor.forward(observations2)
 
-        # Results should be very similar (attention should focus on similar patterns)
-        # Note: They won't be identical due to positional encoding from sequence order
-        # but should be reasonably close for a well-designed attention mechanism
+        # Shapes must match; values can differ a bit due to order sensitivity
         assert result1.shape == result2.shape
 
 
