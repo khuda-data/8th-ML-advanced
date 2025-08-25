@@ -1,22 +1,12 @@
-"""
-Main training script for KHUDAFinder using configuration-based setup.
-Uses predefined configuration presets for different training scenarios.
-"""
-
 import time
 import os
 import torch
-import warnings
 from stable_baselines3 import SAC
 from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import VecVideoRecorder
 
-# Suppress specific warnings about environment type mismatch
-warnings.filterwarnings(
-    "ignore", message=".*Training and eval env are not of the same type.*"
-)
-
+from sac import KFSACPolicy
 from env.kf_env import KFEnv
 from env.entities.agent import Agent
 from env.entities.stable_obstacle import StableObstacle
@@ -36,23 +26,16 @@ CONFIG_PRESET = "standard"  # Change this to use different configurations
 config = get_config(CONFIG_PRESET)
 
 
-def make_env(eval_mode=False):
-    """
-    Create environment factory function for vectorized environments.
-
-    Args:
-        eval_mode (bool): If True, creates environment for evaluation with video recording
-
-    Returns:
-        callable: Environment factory function that returns initialized KFEnv
-    """
-
+def make_env(is_eval=False):
     def _init():
-        render_mode = (
-            "rgb_array"
-            if eval_mode and config.video.record_video
-            else config.environment.render_mode
-        )
+        # Determine render mode based on video recording settings
+        if is_eval and config.eval_video.record_eval:
+            render_mode = "rgb_array"
+        elif not is_eval and config.training_video.record_training:
+            render_mode = "rgb_array"
+        else:
+            render_mode = config.environment.render_mode
+
         env = KFEnv(
             max_obstacles=config.environment.max_obstacles,
             target_radius=config.environment.target_radius,
@@ -72,28 +55,50 @@ def make_env(eval_mode=False):
 
 
 def main():
-    print(f"Using configuration preset: '{CONFIG_PRESET}'")
-
     torch.manual_seed(config.training.seed)
 
-    os.makedirs(config.logging.tensorboard_log, exist_ok=True)
+    directories_to_create = [
+        config.logging.logs_dir,
+        config.logging.tensorboard_dir,
+        config.checkpoint.checkpoint_dir,
+        config.eval.log_dir,
+    ]
 
-    save_dir = os.path.dirname(config.logging.save_path)
-    if save_dir:
-        os.makedirs(save_dir, exist_ok=True)
+    if config.training_video.record_training:
+        directories_to_create.append(config.training_video.trains_dir)
 
-    print("Creating vectorized training environment...")
+    if config.eval_video.record_eval:
+        directories_to_create.extend(
+            [
+                config.eval_video.evals_dir,
+                (
+                    config.eval_video.best_dir
+                    if config.eval_video.record_best
+                    else None
+                ),
+            ]
+        )
+
+    directories_to_create = [d for d in directories_to_create if d is not None]
+    for directory in directories_to_create:
+        os.makedirs(directory, exist_ok=True)
+
     env = make_vec_env(
-        make_env(eval_mode=False),
+        make_env(is_eval=False),
         n_envs=config.training.n_envs,
         seed=config.training.seed,
     )
 
-    print(
-        f"Created {config.training.n_envs} parallel environments for training"
-    )
+    if config.training_video.record_training:
+        env = VecVideoRecorder(
+            env,
+            config.training_video.trains_dir,
+            record_video_trigger=lambda x: x % config.training_video.video_freq
+            == 0,
+            video_length=config.training_video.video_length,
+            name_prefix="train",
+        )
 
-    print("Creating policy kwargs...")
     policy_kwargs = {
         "net_arch": config.network.net_arch,
         "activation_fn": config.network.activation_fn,
@@ -109,9 +114,8 @@ def main():
         },
     }
 
-    print("Creating SAC model...")
     model = SAC(
-        policy="MultiInputPolicy",  # Policy for Dict observation spaces
+        policy=KFSACPolicy,
         env=env,
         learning_rate=config.sac.learning_rate,
         buffer_size=config.sac.buffer_size,
@@ -123,49 +127,48 @@ def main():
         policy_kwargs=policy_kwargs,
         device=config.device.device,
         verbose=config.logging.verbose,
-        tensorboard_log=config.logging.tensorboard_log,
+        tensorboard_log=config.logging.tensorboard_dir,
     )
 
-    print("Testing vectorized model with sample actions...")
     try:
         callbacks = []
 
         checkpoint_callback = CheckpointCallback(
-            save_freq=config.logging.save_freq,
-            save_path=f"{config.logging.save_path}/checkpoints/",
-            name_prefix="checkpoint",
+            save_freq=config.checkpoint.save_freq,
+            save_path=config.checkpoint.checkpoint_dir,
+            name_prefix="cp",
         )
         callbacks.append(checkpoint_callback)
 
-        if config.training.eval_freq > 0:
+        if config.eval.eval_freq > 0:
             eval_env = make_vec_env(
-                make_env(eval_mode=True), n_envs=config.training.n_eval_envs
+                make_env(is_eval=True), n_envs=config.eval.n_eval_envs
             )
 
-            if config.video.record_video:
-                video_dir = f"{config.logging.tensorboard_log}/evals/"
-                os.makedirs(video_dir, exist_ok=True)
-
+            if config.eval_video.record_eval:
                 eval_env = VecVideoRecorder(
                     eval_env,
-                    video_dir,
-                    record_video_trigger=lambda x: x % config.video.video_freq
+                    config.eval_video.evals_dir,
+                    record_video_trigger=lambda x: x
+                    % config.eval_video.video_freq
                     == 0,
-                    video_length=config.video.video_length,
+                    video_length=config.eval_video.video_length,
+                    name_prefix="evaluation",
                 )
 
             eval_callback = EvalCallback(
                 eval_env,
-                best_model_save_path=f"{config.logging.save_path}/best/",
-                log_path=f"{config.logging.tensorboard_log}/evals/",
-                eval_freq=config.training.eval_freq,
-                n_eval_episodes=config.training.eval_episodes,
+                best_model_save_path=os.path.dirname(
+                    config.eval.best_model_path
+                ),
+                log_path=config.eval.log_dir,
+                eval_freq=config.eval.eval_freq,
+                n_eval_episodes=config.eval.eval_episodes,
                 deterministic=True,
                 render=False,
             )
             callbacks.append(eval_callback)
 
-        print("Starting learning...")
         model.learn(
             total_timesteps=config.training.total_timesteps,
             log_interval=config.training.log_interval,
@@ -180,13 +183,12 @@ def main():
         traceback.print_exc()
         raise
 
-    model.save(config.logging.save_path)
+    model.save(config.checkpoint.latest_model_path)
 
     env.close()
 
 
 if __name__ == "__main__":
-    # Print available presets for user reference
     print("Available configuration presets:")
     for preset in list_available_presets():
         print(f"  - {preset}")

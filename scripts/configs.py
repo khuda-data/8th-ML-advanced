@@ -62,36 +62,129 @@ class TrainingConfig:
     """Training process configuration."""
 
     total_timesteps: int = 1_000_000
-    eval_freq: int = 10_000
-    eval_episodes: int = 5
-    log_interval: int = 1000
-    n_envs: int = 8  # Number of parallel training environments
-    n_eval_envs: int = 2  # Number of parallel evaluation environments
+    log_interval: int = 1_000
+    n_envs: int = 8
     seed: int = 42
 
 
 @dataclass
-class LoggingConfig:
-    """Logging and saving configuration."""
+class EvalConfig:
+    """Evaluation configuration for model assessment."""
 
-    save_path: str = "sac_attention"
-    tensorboard_log: str = None  # Will be auto-generated from save_path
-    save_freq: int = 10000
-    verbose: int = 1
+    eval_freq: int = 10_000
+    eval_episodes: int = 5
+    n_eval_envs: int = 2
+
+    eval_dir: str = "evals"
+    best_model_path: str = None
+    log_dir: str = None
+    metric_path: str = None
+    plots_dir: str = None
 
     def __post_init__(self):
-        # Auto-generate tensorboard_log path if not provided
-        if self.tensorboard_log is None:
-            self.tensorboard_log = f"{self.save_path}/logs/"
+        if self.best_model_path is None:
+            self.best_model_path = f"{self.eval_dir}/best.zip"
+        if self.log_dir is None:
+            self.log_dir = f"{self.eval_dir}/logs"
+        if self.metric_path is None:
+            self.metric_path = f"{self.eval_dir}/metrics.json"
+        if self.plots_dir is None:
+            self.plots_dir = f"{self.eval_dir}/plots"
+
+
+@dataclass
+class CheckPointConfig:
+    """Checkpoint saving and loading configuration."""
+
+    save_freq: int = 10_000
+    max_checkpoints: int = 5
+
+    checkpoint_dir: str = "checkpoints"
+    latest_model_path: str = None
+    backup_dir: str = None
+
+    def __post_init__(self):
+        if self.latest_model_path is None:
+            self.latest_model_path = f"{self.checkpoint_dir}/latest.zip"
+        if self.backup_dir is None:
+            self.backup_dir = f"{self.checkpoint_dir}/backups"
+
+
+@dataclass
+class LoggingConfig:
+    """Logging and monitoring configuration."""
+
+    verbose: int = 1
+
+    logs_dir: str = "logs"
+    trains_path: str = None
+    errors_path: str = None
+    tensorboard_dir: str = None
+
+    def __post_init__(self):
+        if self.tensorboard_dir is None:
+            self.tensorboard_dir = f"{self.logs_dir}/tensorboard/"
+        if self.trains_path is None:
+            self.trains_path = f"{self.logs_dir}/trains.log"
+        if self.errors_path is None:
+            self.errors_path = f"{self.logs_dir}/errors.log"
 
 
 @dataclass
 class VideoConfig:
-    """Video recording configuration."""
+    """Base video recording configuration."""
 
     record_video: bool = True
-    video_freq: int = 5000  # Video recording frequency
-    video_length: int = 10000  # Length of recorded videos
+    video_freq: int = 5000
+    video_length: int = 10000
+    videos_dir: str = "videos"
+
+    def get_trains_dir(self) -> str:
+        return f"{self.videos_dir}/trains"
+
+    def get_evals_dir(self) -> str:
+        return f"{self.videos_dir}/evals"
+
+    def get_best_dir(self) -> str:
+        return f"{self.videos_dir}/best"
+
+
+@dataclass
+class TrainingVideoConfig(VideoConfig):
+    """Training video recording configuration."""
+
+    video_freq: int = 50000
+    record_training: bool = True
+
+    @property
+    def trains_dir(self) -> str:
+        return self.get_trains_dir()
+
+    def __post_init__(self):
+        if self.record_training and not self.record_video:
+            self.record_video = True
+
+
+@dataclass
+class EvalVideoConfig(VideoConfig):
+    """Evaluation video recording configuration."""
+
+    record_eval: bool = True
+    record_best: bool = True
+
+    @property
+    def evals_dir(self) -> str:
+        return self.get_evals_dir()
+
+    @property
+    def best_dir(self) -> str:
+        return self.get_best_dir()
+
+    def __post_init__(self):
+        if self.record_eval and not self.record_video:
+            self.record_video = True
+        if self.record_best and not self.record_video:
+            self.record_video = True
 
 
 @dataclass
@@ -110,6 +203,14 @@ class FullConfig:
     sac: SACConfig
     network: NetworkConfig
     training: TrainingConfig
+    eval: EvalConfig
+    checkpoint: CheckPointConfig
+    logging: LoggingConfig
+    training_video: TrainingVideoConfig
+    eval_video: EvalVideoConfig
+    device: DeviceConfig
+    eval: EvalConfig
+    checkpoint: CheckPointConfig
     logging: LoggingConfig
     video: VideoConfig
     device: DeviceConfig
@@ -127,17 +228,17 @@ def get_standard_config() -> FullConfig:
     """
     return FullConfig(
         environment=EnvironmentConfig(
-            max_obstacles=50,
+            max_obstacles=10,
             target_radius=1,
-            recognition_radius=10,
-            destruction_radius=25,
-            n_obstacles=50,
+            recognition_radius=7.5,
+            destruction_radius=15,
+            n_obstacles=10,
             render_mode="rgb_array",
         ),
         feature_extractor=FeatureExtractorConfig(
             d_model=64,
             n_heads=4,
-            n_layers=1,
+            n_layers=2,
             dropout=0.1,
             include_acceleration=True,
         ),
@@ -147,26 +248,38 @@ def get_standard_config() -> FullConfig:
             batch_size=128,
             learning_starts=10_000,
         ),
-        network=NetworkConfig(net_arch=[256, 256]),
+        network=NetworkConfig(net_arch=[128, 64, 32, 16]),
         training=TrainingConfig(
             total_timesteps=1_000_000_000,
-            eval_freq=10_000,
-            eval_episodes=1,
-            log_interval=1_000,
-            n_envs=4,
-            n_eval_envs=1,
+            log_interval=10_00,
+            n_envs=8,
         ),
-        logging=LoggingConfig(save_freq=100_000, save_path="standard"),
-        video=VideoConfig(
-            record_video=True, video_freq=10_000, video_length=1_000
+        eval=EvalConfig(
+            eval_freq=10_000,
+            eval_episodes=4,
+            n_eval_envs=4,
+            eval_dir="standard/evals",
+        ),
+        checkpoint=CheckPointConfig(
+            save_freq=100_000,
+            max_checkpoints=5,
+            checkpoint_dir="standard/cps",
+        ),
+        logging=LoggingConfig(
+            logs_dir="standard/logs",
+        ),
+        training_video=TrainingVideoConfig(
+            videos_dir="standard/videos",
+            record_training=True,
+        ),
+        eval_video=EvalVideoConfig(
+            videos_dir="standard/videos",
+            record_eval=True,
+            record_best=True,
         ),
         device=DeviceConfig(device="auto"),
     )
 
-
-# =============================================================================
-# Configuration Registry
-# =============================================================================
 
 CONFIG_PRESETS = {
     "standard": get_standard_config,
