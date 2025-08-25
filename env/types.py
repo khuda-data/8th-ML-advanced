@@ -9,10 +9,10 @@ class CollisionType(IntEnum):
 
 
 class RewardType(float, Enum):
-    TIME_ALPHA = 0.5
-    TARGET_REACHED = 30.0
-    COLLISION_OCCURRED = 30.0
-    TARGET_DESTROYED = 60.0
-    STAGNATION_PENALTY_MAX = 5.0
-    STAGNATION_PENALTY_DECAY = 70.0
-    DIRECTION_SENSITIVITY_K = 10.0
+    # Distance-based reward parameters
+    TARGET_REWARD_SCALE = 15.0  # Scale for target proximity reward
+    OBSTACLE_PENALTY_SCALE = 8.0  # Scale for obstacle avoidance penalty
+    SAFETY_RADIUS = 2.5  # Minimum safe distance from obstacles
+    TARGET_BONUS = 100.0  # Bonus for reaching target
+    COLLISION_PENALTY = 30.0  # Penalty for collision
+    BOUNDARY_PENALTY = 20.0  # Penalty for going out of bounds

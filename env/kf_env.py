@@ -434,48 +434,53 @@ class KFEnv(gym.Env):
     def _calculate_reward(self) -> float:
         if not self.agent:
             return 0.0
-        
-        current_dist = self._get_distance_to_target()
-        progress = self.pre_distance_to_target - current_dist
-        move_distance = abs(progress)
 
-        w = RewardType.TARGET_REACHED
-        r = self.destruction_radius
-        # reward = ( -w / r ) * x + w
-        distance_reward = (w / r**2) * (current_dist - r)**2 
-        # 거리 보상
-        # reward = ( 2 * w / r**3 ) * x**3 - ( 3*w / r**2 ) * x**2 + w
+        agent_pos = self.agent.get_position()
 
-        # --- 요구사항 적용 시작 ---
-        # 1. 방향성 조건: 가까워지는 움직임일 때만 거리 보상을 부여합니다.
-        # progress가 0보다 크면 (가까워졌으면) distance_reward를 그대로 사용하고,
-        # 그렇지 않으면 (멀어졌거나 그대로면) 보상을 0으로 만듭니다.
-        if progress > 0:
-            final_reward = distance_reward
-        else:
-            final_reward = 0.0
+        target_distance = agent_pos.distance_to(self.target_position)
+        max_distance = self.destruction_radius
 
-        stagnation_penalty = -RewardType.STAGNATION_PENALTY_MAX * math.exp(-RewardType.STAGNATION_PENALTY_DECAY * move_distance)
+        normalized_target_dist = min(target_distance / max_distance, 1.0)
+        target_reward = (
+            1.0 - normalized_target_dist**2
+        ) * RewardType.TARGET_REWARD_SCALE
 
-        reward = final_reward + stagnation_penalty
+        obstacle_penalty = 0.0
 
-        # if self._check_target_reached():
-        #     reward += RewardType.TARGET_REACHED
-        # el
-        if self.collision_occurred:
-            reward -= RewardType.COLLISION_OCCURRED * self._get_time_penalty()
-        elif self._is_out_destruction_(self.target_position):
-            reward -= RewardType.TARGET_DESTROYED * self._get_time_penalty()
+        for obstacle in self.obstacles:
+            obstacle_pos = obstacle.get_position()
+            obstacle_distance = agent_pos.distance_to(obstacle_pos)
 
+            if obstacle_distance <= self.recognition_radius:
+                if obstacle_distance < RewardType.SAFETY_RADIUS:
+                    penalty_ratio = (
+                        RewardType.SAFETY_RADIUS - obstacle_distance
+                    ) / RewardType.SAFETY_RADIUS
+                    obstacle_penalty += (
+                        penalty_ratio**2
+                    ) * RewardType.OBSTACLE_PENALTY_SCALE
+
+        target_bonus = 0.0
         if self._check_target_reached():
-            reward -= self._get_time_penalty()
+            target_bonus = RewardType.TARGET_BONUS
 
-        # print(RewardType.STAGNATION_PENALTY_MAX * math.exp(-RewardType.STAGNATION_PENALTY_DECAY * move_distance))
+        collision_penalty = 0.0
+        if self.collision_occurred:
+            collision_penalty = RewardType.COLLISION_PENALTY
 
-        return reward
+        boundary_penalty = 0.0
+        if self._is_out_destruction_(self.target_position):
+            boundary_penalty = RewardType.BOUNDARY_PENALTY
 
-    def _get_time_penalty(self) -> float:
-        return RewardType.TIME_ALPHA * self.elapsed_steps
+        total_reward = (
+            target_reward
+            - obstacle_penalty
+            + target_bonus
+            - collision_penalty
+            - boundary_penalty
+        )
+
+        return total_reward
 
     def _check_target_reached(self) -> bool:
         if not self.agent:
