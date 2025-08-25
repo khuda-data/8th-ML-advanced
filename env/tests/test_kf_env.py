@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 from pygame import Vector2
 
+
 # 창 없는 환경에서 pygame이 윈도우를 띄우지 않도록 설정
 @pytest.fixture(scope="session", autouse=True)
 def _headless_pygame():
@@ -54,13 +55,17 @@ def test_init_default_values():
         target_space = obs_space.spaces["target"]
         mask_space = obs_space.spaces["mask"]
 
-        assert agent_space.shape == (7,)
+        # New observation structure: agent[5], obstacles[7], target[2]
+        assert agent_space.shape == (5,)  # radius, vel_x, vel_y, acc_x, acc_y
         assert agent_space.dtype == np.float32
 
-        assert obstacles_space.shape == (env.max_obstacles, 7)
+        assert obstacles_space.shape == (
+            env.max_obstacles,
+            7,
+        )  # radius, rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y, acc_x, acc_y
         assert obstacles_space.dtype == np.float32
 
-        assert target_space.shape == (2,)
+        assert target_space.shape == (2,)  # rel_pos_x, rel_pos_y
         assert target_space.dtype == np.float32
 
         assert mask_space.shape == (env.max_obstacles,)
@@ -70,7 +75,13 @@ def test_init_default_values():
 
 
 def test_init_custom_values():
-    env = KFEnv(render_mode="human", max_obstacles=5, target_radius=2.0, recognition_radius=8.0, destruction_radius=20.0)
+    env = KFEnv(
+        render_mode="human",
+        max_obstacles=5,
+        target_radius=2.0,
+        recognition_radius=8.0,
+        destruction_radius=20.0,
+    )
     try:
         assert env.render_mode == "human"
         assert env.max_obstacles == 5
@@ -87,13 +98,17 @@ def test_reset_observation_structure_and_dtypes(env):
     assert isinstance(obs, dict)
     assert isinstance(info, dict)
 
-    assert obs["agent"].shape == (7,)
+    # New observation structure
+    assert obs["agent"].shape == (5,)  # radius, vel_x, vel_y, acc_x, acc_y
     assert obs["agent"].dtype == np.float32
 
-    assert obs["obstacles"].shape == (env.max_obstacles, 7)
+    assert obs["obstacles"].shape == (
+        env.max_obstacles,
+        7,
+    )  # radius, rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y, acc_x, acc_y
     assert obs["obstacles"].dtype == np.float32
 
-    assert obs["target"].shape == (2,)
+    assert obs["target"].shape == (2,)  # rel_pos_x, rel_pos_y
     assert obs["target"].dtype == np.float32
 
     assert obs["mask"].shape == (env.max_obstacles,)
@@ -117,7 +132,10 @@ def test_step_contract_and_elapsed_steps(env):
 def test_step_extreme_actions_do_not_crash(env):
     env.reset()
     # extreme values within action_space bounds
-    for a in [np.array([1.0, 1.0], dtype=np.float32), np.array([-1.0, -1.0], dtype=np.float32)]:
+    for a in [
+        np.array([1.0, 1.0], dtype=np.float32),
+        np.array([-1.0, -1.0], dtype=np.float32),
+    ]:
         obs, reward, terminated, truncated, info = env.step(a)
         # 기본적인 반환형 검증
         assert isinstance(obs, dict)
@@ -135,7 +153,9 @@ def test_reward_is_finite(env):
 def test_termination_on_target_reached(env):
     env.reset()
     # 에이전트를 타깃 위치로 강제로 이동 -> terminated True
-    env.agent.set_position(Vector2(env.target_position.x, env.target_position.y))
+    env.agent.set_position(
+        Vector2(env.target_position.x, env.target_position.y)
+    )
     _, _, terminated, truncated, _ = env.step(np.zeros(2, dtype=np.float32))
     assert terminated is True
     assert truncated is False
@@ -161,8 +181,16 @@ def test_observation_bounds_within_destruction_radius(env):
     # agent 위치는 reset에서 (0,0)으로 세팅되므로 target만 검사
     target = obs["target"]
     # target은 agent 중심으로 destruction_radius 내에 생성됨
-    assert -env.destruction_radius - 1e-6 <= float(target[0]) <= env.destruction_radius + 1e-6
-    assert -env.destruction_radius - 1e-6 <= float(target[1]) <= env.destruction_radius + 1e-6
+    assert (
+        -env.destruction_radius - 1e-6
+        <= float(target[0])
+        <= env.destruction_radius + 1e-6
+    )
+    assert (
+        -env.destruction_radius - 1e-6
+        <= float(target[1])
+        <= env.destruction_radius + 1e-6
+    )
 
 
 def test_multiple_resets_change_target(env):
@@ -170,7 +198,9 @@ def test_multiple_resets_change_target(env):
     targets = []
     for s in [0, 1, 2]:
         _, _ = env.reset(seed=s)
-        targets.append((float(env.target_position.x), float(env.target_position.y)))
+        targets.append(
+            (float(env.target_position.x), float(env.target_position.y))
+        )
     # 서로 다른 시드로 reset하면 적어도 하나는 달라야 함
     assert len(set(targets)) > 1
 

@@ -6,8 +6,8 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 from .utils import (
     extract_agent_features,
-    extract_target_relative_features,
-    extract_obstacle_relative_features,
+    extract_target_features,
+    extract_obstacle_features,
     validate_observation_tensors,
 )
 
@@ -22,6 +22,7 @@ class AttentionExtractor(BaseFeaturesExtractor):
         num_layers: int = 1,
         max_obstacles: int = 10,
         include_acceleration: bool = False,
+        include_radius: bool = True,
         **kwargs,
     ):
         self._d_model = d_model
@@ -29,10 +30,23 @@ class AttentionExtractor(BaseFeaturesExtractor):
         self._num_layers = num_layers
         self._max_obstacles = max_obstacles
         self._include_acceleration = include_acceleration
+        self._include_radius = include_radius
 
-        self._agent_size = 4 if include_acceleration else 2
-        self._target_size = 2
-        self._obstacle_size = 6 if include_acceleration else 4
+        agent_features = 2
+        if include_radius:
+            agent_features += 1
+        if include_acceleration:
+            agent_features += 2
+        self._agent_size = agent_features
+
+        self._target_size = 2  # rel_pos_x, rel_pos_y (always same)
+
+        obstacle_features = 4
+        if include_radius:
+            obstacle_features += 1
+        if include_acceleration:
+            obstacle_features += 2
+        self._obstacle_size = obstacle_features
 
         features_dim = self._target_size + d_model
         super().__init__(observation_space, features_dim)
@@ -85,19 +99,25 @@ class AttentionExtractor(BaseFeaturesExtractor):
         mask = observations["mask"]
 
         validate_observation_tensors(
-            agent_data, obstacles_data, target_data, mask, self._max_obstacles
+            agent_data,
+            obstacles_data,
+            target_data,
+            mask,
+            self._max_obstacles,
+            self._include_acceleration,
         )
 
         agent_features = extract_agent_features(
-            agent_data, self._include_acceleration
+            agent_data, self._include_acceleration, self._include_radius
         )
 
-        target_features = extract_target_relative_features(
-            agent_data, target_data
-        )
+        target_features = extract_target_features(target_data)
 
-        obstacle_features = extract_obstacle_relative_features(
-            agent_data, obstacles_data, mask, self._include_acceleration
+        obstacle_features = extract_obstacle_features(
+            obstacles_data,
+            mask,
+            self._include_acceleration,
+            self._include_radius,
         )
 
         attended_features = self._apply_attention(

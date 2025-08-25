@@ -28,7 +28,6 @@ config = get_config(CONFIG_PRESET)
 
 def make_env(is_eval=False):
     def _init():
-        # Determine render mode based on video recording settings
         if is_eval and config.eval_video.record_video:
             render_mode = "rgb_array"
         elif not is_eval and config.training_video.record_video:
@@ -41,6 +40,8 @@ def make_env(is_eval=False):
             target_radius=config.environment.target_radius,
             recognition_radius=config.environment.recognition_radius,
             destruction_radius=config.environment.destruction_radius,
+            max_velocity=config.environment.max_velocity,
+            max_acceleration=config.environment.max_acceleration,
             render_mode=render_mode,
         )
 

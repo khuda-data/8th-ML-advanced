@@ -5,8 +5,8 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 from .utils import (
     extract_agent_features,
-    extract_target_relative_features,
-    extract_obstacle_relative_features,
+    extract_target_features,
+    extract_obstacle_features,
     validate_observation_tensors,
 )
 
@@ -16,10 +16,23 @@ class PaddingExtractor(BaseFeaturesExtractor):
     def __init__(self, observation_space: spaces.Dict, **kwargs):
         self._max_obstacles = kwargs.get("max_obstacles", 10)
         self._include_acceleration = kwargs.get("include_acceleration", False)
+        self._include_radius = kwargs.get("include_radius", True)
 
-        self._agent_size = 4 if self._include_acceleration else 2
-        self._target_size = 2
-        self._obstacle_size = 6 if self._include_acceleration else 4
+        agent_features = 2
+        if self._include_radius:
+            agent_features += 1
+        if self._include_acceleration:
+            agent_features += 2
+        self._agent_size = agent_features
+
+        self._target_size = 2  # rel_pos_x, rel_pos_y (always same)
+
+        obstacle_features = 4
+        if self._include_radius:
+            obstacle_features += 1
+        if self._include_acceleration:
+            obstacle_features += 2
+        self._obstacle_size = obstacle_features
         self._obstacles_total_size = self._obstacle_size * self._max_obstacles
 
         self._features_dim = (
@@ -46,19 +59,25 @@ class PaddingExtractor(BaseFeaturesExtractor):
         mask = observations["mask"]
 
         validate_observation_tensors(
-            agent_data, obstacles_data, target_data, mask, self._max_obstacles
+            agent_data,
+            obstacles_data,
+            target_data,
+            mask,
+            self._max_obstacles,
+            self._include_acceleration,
         )
 
         agent_features = extract_agent_features(
-            agent_data, self._include_acceleration
+            agent_data, self._include_acceleration, self._include_radius
         )
 
-        target_features = extract_target_relative_features(
-            agent_data, target_data
-        )
+        target_features = extract_target_features(target_data)
 
-        obstacle_features = extract_obstacle_relative_features(
-            agent_data, obstacles_data, mask, self._include_acceleration
+        obstacle_features = extract_obstacle_features(
+            obstacles_data,
+            mask,
+            self._include_acceleration,
+            self._include_radius,
         )
 
         obstacles_flat = self._flatten_obstacle_features(

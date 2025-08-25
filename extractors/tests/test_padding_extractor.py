@@ -16,15 +16,20 @@ from ..padding_extractor import PaddingExtractor
 class TestPaddingExtractor:
     """Test suite for PaddingExtractor class."""
 
-    def create_test_observation_space(self):
+    def create_test_observation_space(self, include_acceleration: bool = False):
         """Create a test observation space for the extractor."""
+        agent_size = 5 if include_acceleration else 3
+        obstacle_size = 7 if include_acceleration else 5
+
         return spaces.Dict(
             {
                 "agent": spaces.Box(
-                    low=-float("inf"), high=float("inf"), shape=(7,)
+                    low=-float("inf"), high=float("inf"), shape=(agent_size,)
                 ),
                 "obstacles": spaces.Box(
-                    low=-float("inf"), high=float("inf"), shape=(10, 7)
+                    low=-float("inf"),
+                    high=float("inf"),
+                    shape=(10, obstacle_size),
                 ),
                 "target": spaces.Box(
                     low=-float("inf"), high=float("inf"), shape=(2,)
@@ -34,12 +39,18 @@ class TestPaddingExtractor:
         )
 
     def create_test_observations(
-        self, batch_size: int = 2, max_obstacles: int = 10
+        self,
+        batch_size: int = 2,
+        max_obstacles: int = 10,
+        include_acceleration: bool = False,
     ):
         """Create test observation tensors."""
+        agent_size = 5 if include_acceleration else 3
+        obstacle_size = 7 if include_acceleration else 5
+
         return {
-            "agent": torch.randn(batch_size, 7),
-            "obstacles": torch.randn(batch_size, max_obstacles, 7),
+            "agent": torch.randn(batch_size, agent_size),
+            "obstacles": torch.randn(batch_size, max_obstacles, obstacle_size),
             "target": torch.randn(batch_size, 2),
             "mask": torch.randint(0, 2, (batch_size, max_obstacles)).float(),
         }

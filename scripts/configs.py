@@ -19,6 +19,9 @@ class EnvironmentConfig:
     n_obstacles: int = 20
     render_mode: Optional[str] = None  # None, "human", "rgb_array"
 
+    max_velocity: float = 10.0
+    max_acceleration: float = 5.0
+
 
 @dataclass
 class FeatureExtractorConfig:

@@ -10,123 +10,118 @@ import torch
 
 
 def extract_agent_features(
-    agent_data: torch.Tensor, include_acceleration: bool = False
-) -> torch.Tensor:
-    """
-    Extract agent's dynamic features (velocity and optionally acceleration).
-
-    This function extracts the agent's velocity and optionally acceleration
-    from the full agent observation vector. The position and radius are
-    excluded as they are not used as features in the extractor networks.
-
-    Args:
-        agent_data: Tensor of shape [batch_size, 7] containing agent observations
-                   in format [radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y]
-        include_acceleration: If True, includes acceleration components in output.
-                            If False, only velocity components are returned.
-
-    Returns:
-        Tensor of shape [batch_size, 2] if include_acceleration=False (velocity only)
-        or [batch_size, 4] if include_acceleration=True (velocity + acceleration)
-
-    Example:
-        >>> agent_data = torch.tensor([[0.5, 1.0, 2.0, 0.1, 0.2, 0.01, 0.02]])
-        >>> extract_agent_features(agent_data, False)
-        tensor([[0.1000, 0.2000]])
-        >>> extract_agent_features(agent_data, True)
-        tensor([[0.1000, 0.2000, 0.0100, 0.0200]])
-    """
-    if include_acceleration:
-        return agent_data[:, [3, 4, 5, 6]]
-    else:
-        return agent_data[:, [3, 4]]
-
-
-def extract_target_relative_features(
-    agent_data: torch.Tensor, target_data: torch.Tensor
-) -> torch.Tensor:
-    """
-    Extract target position relative to agent position.
-
-    Converts absolute target position to relative position with respect to
-    the agent's current position. This provides translation-invariant features
-    that help the model focus on relative spatial relationships rather than
-    absolute coordinates.
-
-    Args:
-        agent_data: Tensor of shape [batch_size, 7] containing agent observations
-                   in format [radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y]
-        target_data: Tensor of shape [batch_size, 2] containing target positions
-                    in format [pos_x, pos_y]
-
-    Returns:
-        Tensor of shape [batch_size, 2] containing relative target position
-        in format [rel_pos_x, rel_pos_y] where rel_pos = target_pos - agent_pos
-
-    Example:
-        >>> agent_data = torch.tensor([[0.5, 1.0, 2.0, 0.1, 0.2, 0.01, 0.02]])
-        >>> target_data = torch.tensor([[5.0, 6.0]])
-        >>> extract_target_relative_features(agent_data, target_data)
-        tensor([[4.0000, 4.0000]])
-    """
-    agent_pos = agent_data[:, [1, 2]]
-    target_pos = target_data
-    rel_target_pos = target_pos - agent_pos
-    return rel_target_pos
-
-
-def extract_obstacle_relative_features(
     agent_data: torch.Tensor,
+    include_acceleration: bool = False,
+    include_radius: bool = True,
+) -> torch.Tensor:
+    """
+    Extract agent's features from pre-processed observation.
+
+    The new observation structure provides agent features in the format:
+    [radius, vel_x, vel_y, acc_x, acc_y] (all pre-scaled)
+
+    Args:
+        agent_data: Tensor of shape [batch_size, 5] containing agent observations
+                   in format [radius, vel_x, vel_y, acc_x, acc_y] (pre-scaled)
+        include_acceleration: If True, includes acceleration features
+        include_radius: If True, includes radius feature
+
+    Returns:
+        Tensor with selected features based on parameters
+
+    Example:
+        >>> agent_data = torch.tensor([[0.5, 0.1, 0.2, 0.01, 0.02]])
+        >>> extract_agent_features(agent_data, include_acceleration=True, include_radius=True)
+        tensor([[0.5000, 0.1000, 0.2000, 0.0100, 0.0200]])
+        >>> extract_agent_features(agent_data, include_acceleration=False, include_radius=False)
+        tensor([[0.1000, 0.2000]])
+    """
+    features = []
+
+    if include_radius:
+        features.append(agent_data[:, 0:1])  # radius
+
+    features.append(agent_data[:, 1:3])  # vel_x, vel_y
+
+    if include_acceleration:
+        features.append(agent_data[:, 3:5])  # acc_x, acc_y
+
+    return torch.cat(features, dim=1)
+
+
+def extract_target_features(target_data: torch.Tensor) -> torch.Tensor:
+    """
+    Extract target position features from pre-processed observation.
+
+    The new observation structure already provides target position relative to agent,
+    scaled by recognition radius: [rel_pos_x, rel_pos_y]
+
+    Args:
+        target_data: Tensor of shape [batch_size, 2] containing target relative position
+                    in format [rel_pos_x, rel_pos_y] (pre-scaled)
+
+    Returns:
+        Tensor of shape [batch_size, 2] containing pre-processed relative target position
+
+    Example:
+        >>> target_data = torch.tensor([[0.4, 0.6]])  # Pre-scaled relative position
+        >>> extract_target_features(target_data)
+        tensor([[0.4000, 0.6000]])
+    """
+
+    return target_data
+
+
+def extract_obstacle_features(
     obstacles_data: torch.Tensor,
     mask: torch.Tensor,
     include_acceleration: bool = False,
+    include_radius: bool = True,
 ) -> torch.Tensor:
     """
-    Extract obstacle features relative to agent using vectorized operations.
+    Extract obstacle features from pre-processed observation data.
 
-    This is an optimized version of extract_obstacle_relative_features that
-    uses vectorized tensor operations instead of loops. It computes the same
-    relative position and velocity features but with better performance for
-    large batches or many obstacles. All obstacles are processed simultaneously
-    using broadcasting.
+    The new observation structure provides obstacles with:
+    [radius, rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y, acc_x, acc_y] (all pre-scaled)
 
     Args:
-        agent_data: Tensor of shape [batch_size, 7] containing agent observations
-                   in format [radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y]
         obstacles_data: Tensor of shape [batch_size, max_obstacles, 7] containing
-                       obstacle observations in the same format as agent_data
+                       obstacle observations in format:
+                       [radius, rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y, acc_x, acc_y]
         mask: Tensor of shape [batch_size, max_obstacles] with 1.0 for valid
               obstacles and 0.0 for invalid/padding obstacles
-        include_acceleration: If True, includes obstacle acceleration in features.
-                            If False, only relative position and velocity are used.
+        include_acceleration: If True, includes acceleration features
+        include_radius: If True, includes radius feature
 
     Returns:
-        Tensor of shape [batch_size, max_obstacles, feature_size] where:
-        - feature_size = 4 if include_acceleration=False: [rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y]
-        - feature_size = 5 if include_acceleration=True: [rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y, acc_x, acc_y]
+        Tensor with selected features based on parameters
         Invalid obstacles have all features set to 0.0
 
-    Note:
-        This function produces identical results to extract_obstacle_relative_features
-        but with better computational efficiency through vectorization.
+    Example:
+        >>> obstacles_data = torch.tensor([[[1.0, 0.1, 0.2, 0.01, 0.02, 0.001, 0.002]]])
+        >>> mask = torch.tensor([[1.0]])
+        >>> extract_obstacle_features(obstacles_data, mask, True, True)
+        tensor([[[1.0000, 0.1000, 0.2000, 0.0100, 0.0200, 0.0010, 0.0020]]])
+        >>> extract_obstacle_features(obstacles_data, mask, False, False)
+        tensor([[[0.1000, 0.2000, 0.0100, 0.0200]]])
     """
-    agent_pos = agent_data[:, [1, 2]].unsqueeze(1)
-    agent_vel = agent_data[:, [3, 4]].unsqueeze(1)
+    valid_mask = (mask > 0).float().unsqueeze(-1)
 
-    obs_pos = obstacles_data[:, :, [1, 2]]
-    obs_vel = obstacles_data[:, :, [3, 4]]
+    features = []
 
-    rel_pos = obs_pos - agent_pos
-    rel_vel = obs_vel - agent_vel
+    if include_radius:
+        features.append(obstacles_data[:, :, 0:1])  # radius
+
+    features.append(
+        obstacles_data[:, :, 1:5]
+    )  # rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y
 
     if include_acceleration:
-        obs_acc = obstacles_data[:, :, [5, 6]]
-        features = torch.cat([rel_pos, rel_vel, obs_acc], dim=-1)
-    else:
-        features = torch.cat([rel_pos, rel_vel], dim=-1)
+        features.append(obstacles_data[:, :, 5:7])  # acc_x, acc_y
 
-    valid_mask = (mask > 0).float().unsqueeze(-1)
-    return features * valid_mask
+    selected_features = torch.cat(features, dim=-1)
+
+    return selected_features * valid_mask
 
 
 def validate_observation_tensors(
@@ -135,46 +130,45 @@ def validate_observation_tensors(
     target_data: torch.Tensor,
     mask: torch.Tensor,
     max_obstacles: int,
+    include_acceleration: bool = False,
 ) -> None:
     """
     Validate that input observation tensors have correct shapes and valid values.
 
-    This function performs comprehensive validation of all input tensors used in
-    feature extraction to ensure they meet the expected format and contain valid
-    numerical values. It checks tensor shapes, data types, and value ranges to
-    prevent runtime errors in downstream processing.
+    Updated for the new observation structure with pre-processed features.
 
     Args:
-        agent_data: Tensor of shape [batch_size, 7] containing agent observations
-                   in format [radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y]
-        obstacles_data: Tensor of shape [batch_size, max_obstacles, 7] containing
-                       obstacle observations in the same format as agent_data
-        target_data: Tensor of shape [batch_size, 2] containing target positions
-                    in format [pos_x, pos_y]
+        agent_data: Tensor containing agent observations (pre-scaled)
+        obstacles_data: Tensor containing obstacle observations (pre-scaled)
+        target_data: Tensor of shape [batch_size, 2] containing target relative position
+                    in format [rel_pos_x, rel_pos_y] (pre-scaled)
         mask: Tensor of shape [batch_size, max_obstacles] with values in [0, 1]
               indicating obstacle validity (1.0 = valid, 0.0 = invalid/padding)
-        max_obstacles: Expected maximum number of obstacles. Used to validate
-                      the obstacles_data and mask tensor dimensions.
+        max_obstacles: Expected maximum number of obstacles
+        include_acceleration: If True, expects agent[5] and obstacles[7].
+                            If False, expects agent[3] and obstacles[5].
 
     Raises:
         ValueError: If any tensor has incorrect shape, contains NaN/Inf values,
                    or mask values are outside the valid [0, 1] range.
-
-    Note:
-        This function only validates tensor properties and does not modify
-        the input tensors. It should be called before any feature extraction
-        operations to ensure data integrity.
     """
     batch_size = agent_data.shape[0]
 
-    if agent_data.shape != (batch_size, 7):
+    expected_agent_features = 5 if include_acceleration else 3
+    expected_obstacle_features = 7 if include_acceleration else 5
+
+    if agent_data.shape != (batch_size, expected_agent_features):
         raise ValueError(
-            f"Agent data should have shape ({batch_size}, 7), got {agent_data.shape}"
+            f"Agent data should have shape ({batch_size}, {expected_agent_features}), got {agent_data.shape}"
         )
 
-    if obstacles_data.shape != (batch_size, max_obstacles, 7):
+    if obstacles_data.shape != (
+        batch_size,
+        max_obstacles,
+        expected_obstacle_features,
+    ):
         raise ValueError(
-            f"Obstacles data should have shape ({batch_size}, {max_obstacles}, 7), got {obstacles_data.shape}"
+            f"Obstacles data should have shape ({batch_size}, {max_obstacles}, {expected_obstacle_features}), got {obstacles_data.shape}"
         )
 
     if target_data.shape != (batch_size, 2):
