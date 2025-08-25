@@ -29,9 +29,9 @@ config = get_config(CONFIG_PRESET)
 def make_env(is_eval=False):
     def _init():
         # Determine render mode based on video recording settings
-        if is_eval and config.eval_video.record_eval:
+        if is_eval and config.eval_video.record_video:
             render_mode = "rgb_array"
-        elif not is_eval and config.training_video.record_training:
+        elif not is_eval and config.training_video.record_video:
             render_mode = "rgb_array"
         else:
             render_mode = config.environment.render_mode
@@ -55,8 +55,10 @@ def make_env(is_eval=False):
 
 
 def main():
+    print("Setting random seed...")
     torch.manual_seed(config.training.seed)
 
+    print("Creating directories...")
     directories_to_create = [
         config.logging.logs_dir,
         config.logging.tensorboard_dir,
@@ -82,14 +84,18 @@ def main():
     directories_to_create = [d for d in directories_to_create if d is not None]
     for directory in directories_to_create:
         os.makedirs(directory, exist_ok=True)
+    print(f"Created {len(directories_to_create)} directories")
 
+    print("Creating training environments...")
     env = make_vec_env(
         make_env(is_eval=False),
         n_envs=config.training.n_envs,
         seed=config.training.seed,
     )
+    print(f"Created {config.training.n_envs} parallel environments")
 
-    if config.training_video.record_training:
+    if config.training_video.record_video:
+        print("Setting up training video recording...")
         env = VecVideoRecorder(
             env,
             config.training_video.trains_dir,
@@ -98,7 +104,9 @@ def main():
             video_length=config.training_video.video_length,
             name_prefix="train",
         )
+        print("Training video recording enabled")
 
+    print("Creating policy configuration...")
     policy_kwargs = {
         "net_arch": config.network.net_arch,
         "activation_fn": config.network.activation_fn,
@@ -114,6 +122,7 @@ def main():
         },
     }
 
+    print("Creating SAC model...")
     model = SAC(
         policy=KFSACPolicy,
         env=env,
@@ -129,8 +138,10 @@ def main():
         verbose=config.logging.verbose,
         tensorboard_log=config.logging.tensorboard_dir,
     )
+    print("SAC model created successfully")
 
     try:
+        print("Setting up callbacks...")
         callbacks = []
 
         checkpoint_callback = CheckpointCallback(
@@ -139,13 +150,16 @@ def main():
             name_prefix="cp",
         )
         callbacks.append(checkpoint_callback)
+        print("Checkpoint callback added")
 
         if config.eval.eval_freq > 0:
+            print("Creating evaluation environment...")
             eval_env = make_vec_env(
                 make_env(is_eval=True), n_envs=config.eval.n_eval_envs
             )
 
-            if config.eval_video.record_eval:
+            if config.eval_video.record_video:
+                print("Setting up evaluation video recording...")
                 eval_env = VecVideoRecorder(
                     eval_env,
                     config.eval_video.evals_dir,
@@ -153,7 +167,7 @@ def main():
                     % config.eval_video.video_freq
                     == 0,
                     video_length=config.eval_video.video_length,
-                    name_prefix="evaluation",
+                    name_prefix="eval",
                 )
 
             eval_callback = EvalCallback(
@@ -168,13 +182,16 @@ def main():
                 render=False,
             )
             callbacks.append(eval_callback)
+            print("Evaluation callback added")
 
+        print("Starting training...")
         model.learn(
             total_timesteps=config.training.total_timesteps,
             log_interval=config.training.log_interval,
             callback=callbacks if callbacks else None,
             tb_log_name=time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime()),
         )
+        print("Training completed successfully")
 
     except Exception as e:
         print(f"Error during learning: {e}")
@@ -183,9 +200,13 @@ def main():
         traceback.print_exc()
         raise
 
+    print("Saving final model...")
     model.save(config.checkpoint.latest_model_path)
+    print(f"Model saved to: {config.checkpoint.latest_model_path}")
 
+    print("Closing environments...")
     env.close()
+    print("Training finished")
 
 
 if __name__ == "__main__":

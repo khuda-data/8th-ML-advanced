@@ -134,9 +134,9 @@ class LoggingConfig:
 class VideoConfig:
     """Base video recording configuration."""
 
-    record_video: bool = True
-    video_freq: int = 5000
-    video_length: int = 10000
+    record_video: bool = False
+    video_freq: int = 1000
+    video_length: int = 1000
     videos_dir: str = "videos"
 
     def get_trains_dir(self) -> str:
@@ -153,8 +153,7 @@ class VideoConfig:
 class TrainingVideoConfig(VideoConfig):
     """Training video recording configuration."""
 
-    video_freq: int = 50000
-    record_training: bool = True
+    record_training: bool = False
 
     @property
     def trains_dir(self) -> str:
@@ -169,8 +168,8 @@ class TrainingVideoConfig(VideoConfig):
 class EvalVideoConfig(VideoConfig):
     """Evaluation video recording configuration."""
 
-    record_eval: bool = True
-    record_best: bool = True
+    record_eval: bool = False
+    record_best: bool = False
 
     @property
     def evals_dir(self) -> str:
@@ -212,7 +211,6 @@ class FullConfig:
     eval: EvalConfig
     checkpoint: CheckPointConfig
     logging: LoggingConfig
-    video: VideoConfig
     device: DeviceConfig
 
 
@@ -270,12 +268,14 @@ def get_standard_config() -> FullConfig:
         ),
         training_video=TrainingVideoConfig(
             videos_dir="standard/videos",
-            record_training=True,
+            record_training=False,
         ),
         eval_video=EvalVideoConfig(
             videos_dir="standard/videos",
             record_eval=True,
             record_best=True,
+            video_freq=1_000,
+            video_length=1_000,
         ),
         device=DeviceConfig(device="auto"),
     )
