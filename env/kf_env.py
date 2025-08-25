@@ -342,9 +342,7 @@ class KFEnv(gym.Env):
 
         agent_pos = self.agent.get_position()
         distance_to_target = agent_pos.distance_to(self.target_position)
-        # reward = -distance_to_target * RewardType.DISTANCE_ALPHA
         reward = ( -RewardType.TARGET_REACHED / (self.destruction_radius*2) ) * distance_to_target + RewardType.TARGET_REACHED 
-        # 보상 = (-w / r) * 거리 + w
 
         if self._check_target_reached():
             reward += RewardType.TARGET_REACHED
