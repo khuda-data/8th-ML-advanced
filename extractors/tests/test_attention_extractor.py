@@ -399,8 +399,12 @@ class TestAttentionMechanism:
     def test_apply_attention_shape(self):
         """Test attention application output shape."""
         batch_size = 2
-        agent_features = torch.randn(batch_size, 3)
-        obstacle_features = torch.randn(batch_size, 5, 5)
+        agent_features = torch.randn(
+            batch_size, 5
+        )  # radius + vel_x + vel_y + acc_x + acc_y
+        obstacle_features = torch.randn(
+            batch_size, 5, 7
+        )  # radius + rel_pos_x + rel_pos_y + rel_vel_x + rel_vel_y + acc_x + acc_y
         mask = torch.ones(batch_size, 5)
 
         output = self.extractor._apply_attention(
@@ -412,8 +416,12 @@ class TestAttentionMechanism:
     def test_apply_attention_with_masked_obstacles(self):
         """Test attention with some obstacles masked."""
         batch_size = 2
-        agent_features = torch.randn(batch_size, 3)
-        obstacle_features = torch.randn(batch_size, 5, 5)
+        agent_features = torch.randn(
+            batch_size, 5
+        )  # radius + vel_x + vel_y + acc_x + acc_y
+        obstacle_features = torch.randn(
+            batch_size, 5, 7
+        )  # radius + rel_pos_x + rel_pos_y + rel_vel_x + rel_vel_y + acc_x + acc_y
         mask = torch.tensor(
             [[1.0, 1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 1.0, 0.0, 1.0]]
         )
@@ -514,11 +522,9 @@ class TestAttentionExtractorIntegration:
             "obstacles": torch.tensor(
                 [
                     [
-                        [
-                            [0.3, 1.0, 1.0, -0.5, -0.5, 0.1, 0.1],
-                            [0.4, -1.0, 0.5, 0.2, -0.1, -0.05, 0.05],
-                            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                        ]
+                        [0.3, 1.0, 1.0, -0.5, -0.5, 0.1, 0.1],
+                        [0.4, -1.0, 0.5, 0.2, -0.1, -0.05, 0.05],
+                        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                     ]
                 ],
                 requires_grad=True,
@@ -554,10 +560,8 @@ class TestAttentionExtractorIntegration:
             "obstacles": torch.tensor(
                 [
                     [
-                        [
-                            [0.3, 1.0, 1.0, -0.5, -0.5, 0.1, 0.1],
-                            [0.4, -1.0, 0.5, 0.2, -0.1, -0.05, 0.05],
-                        ]
+                        [0.3, 1.0, 1.0, -0.5, -0.5, 0.1, 0.1],
+                        [0.4, -1.0, 0.5, 0.2, -0.1, -0.05, 0.05],
                     ]
                 ]
             ),

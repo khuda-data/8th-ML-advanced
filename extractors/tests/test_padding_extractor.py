@@ -286,7 +286,7 @@ class TestPaddingExtractorForward:
 
                         output = extractor(observations)
 
-                        expected_dim = 64  # 4 + 2 + (6 * 10)
+                        expected_dim = 66  # 4 + 2 + (6 * 10) = 66
                         assert output.shape == (self.batch_size, expected_dim)
                         assert not torch.isnan(output).any()
                         assert not torch.isinf(output).any()
@@ -428,20 +428,23 @@ class TestPaddingExtractorForward:
                         "extractors.padding_extractor.extract_obstacle_features"
                     ) as mock_obstacle:
                         mock_agent.return_value = torch.randn(
-                            self.batch_size, 3
+                            self.batch_size,
+                            5,  # radius + vel_x + vel_y + acc_x + acc_y (default extractor config)
                         )
                         mock_target.return_value = torch.randn(
                             self.batch_size, 2
                         )
                         mock_obstacle.return_value = torch.randn(
-                            self.batch_size, 5, 5
+                            self.batch_size,
+                            5,
+                            7,  # radius + rel_pos_x + rel_pos_y + rel_vel_x + rel_vel_y + acc_x + acc_y (default extractor config)
                         )
 
                         output = extractor(observations)
 
                         expected_dim = (
-                            3 + 2 + (5 * 5)
-                        )  # agent + target + obstacles
+                            5 + 2 + (5 * 7)
+                        )  # agent + target + obstacles = 5 + 2 + 35 = 42
                         assert output.shape == (self.batch_size, expected_dim)
 
 
@@ -619,7 +622,9 @@ class TestPaddingExtractorIntegration:
 
         output = extractor(observations)
 
-        expected_dim = 3 + 2 + (3 * 5)  # agent + target + obstacles
+        expected_dim = (
+            5 + 2 + (3 * 7)
+        )  # agent + target + obstacles = 5 + 2 + 21 = 28
         assert output.shape == (1, expected_dim)
         assert not torch.isnan(output).any()
         assert not torch.isinf(output).any()
@@ -727,16 +732,20 @@ class TestPaddingExtractorIntegration:
         output = extractor(observations)
 
         # Expected structure: [agent_features, target_features, flattened_obstacles]
-        # agent_features: [radius, vel_x, vel_y] = [0.5, 0.1, 0.2]
+        # agent_features: [radius, vel_x, vel_y, acc_x, acc_y] = [0.5, 0.1, 0.2, 0.01, 0.02]
         # target_features: [0.8, 0.6]
-        # obstacle_features: [radius, rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y] for each obstacle
+        # obstacle_features: [radius, rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y, acc_x, acc_y] for each obstacle
 
-        # Check that agent features come first
-        torch.testing.assert_close(output[0, :3], torch.tensor([0.5, 0.1, 0.2]))
+        # Check that agent features come first (all 5 features with default settings)
+        torch.testing.assert_close(
+            output[0, :5], torch.tensor([0.5, 0.1, 0.2, 0.01, 0.02])
+        )
         # Check that target features come next
-        torch.testing.assert_close(output[0, 3:5], torch.tensor([0.8, 0.6]))
+        torch.testing.assert_close(output[0, 5:7], torch.tensor([0.8, 0.6]))
         # Remaining should be flattened obstacle features
-        assert output.shape[1] == 3 + 2 + (2 * 5)  # agent + target + obstacles
+        assert output.shape[1] == 5 + 2 + (
+            2 * 7
+        )  # agent + target + obstacles = 5 + 2 + 14 = 21
 
     def test_different_configurations(self):
         """Test with different feature configurations."""
@@ -756,12 +765,22 @@ class TestPaddingExtractorIntegration:
             {"include_acceleration": False, "include_radius": False},
         ]
 
-        observations = {
-            "agent": torch.tensor([[0.5, 0.1, 0.2, 0.01, 0.02]]),
+        base_observations = {
+            "agent": torch.tensor(
+                [[0.5, 0.1, 0.2, 0.01, 0.02]]
+            ),  # radius, vel_x, vel_y, acc_x, acc_y
             "obstacles": torch.tensor(
                 [
                     [
-                        [0.3, 1.0, 1.0, -0.5, -0.5, 0.1, 0.1],
+                        [
+                            0.3,
+                            1.0,
+                            1.0,
+                            -0.5,
+                            -0.5,
+                            0.1,
+                            0.1,
+                        ],  # radius, rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y, acc_x, acc_y
                         [0.4, -1.0, 0.5, 0.2, -0.1, -0.05, 0.05],
                     ]
                 ]
@@ -774,6 +793,21 @@ class TestPaddingExtractorIntegration:
             extractor = PaddingExtractor(
                 observation_space, max_obstacles=2, **config
             )
+
+            # Create observation data that matches the configuration
+            observations = {
+                "target": base_observations["target"],
+                "mask": base_observations["mask"],
+            }
+
+            # Adjust agent data based on configuration
+            observations["agent"] = base_observations["agent"]  # All 5 features
+
+            # Adjust obstacle data based on configuration
+            observations["obstacles"] = base_observations[
+                "obstacles"
+            ]  # All 7 features
+
             output = extractor(observations)
 
             # Verify output shape matches expected feature dimensions

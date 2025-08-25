@@ -71,8 +71,6 @@ class PaddingExtractor(BaseFeaturesExtractor):
             target_data,
             mask,
             self._max_obstacles,
-            self._include_acceleration,
-            self._include_radius,
         )
 
         agent_features = extract_agent_features(

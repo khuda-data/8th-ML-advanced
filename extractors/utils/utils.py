@@ -130,8 +130,6 @@ def validate_observation_tensors(
     target_data: torch.Tensor,
     mask: torch.Tensor,
     max_obstacles: int,
-    include_acceleration: bool = True,
-    include_radius: bool = True,
 ) -> None:
     """
     Validate that input observation tensors have correct shapes and valid values.
@@ -155,18 +153,9 @@ def validate_observation_tensors(
     """
     batch_size = agent_data.shape[0]
 
-    # Calculate expected feature sizes based on flags
-    agent_features = 2  # Base: vel_x, vel_y
-    if include_radius:
-        agent_features += 1  # Add radius
-    if include_acceleration:
-        agent_features += 2  # Add acc_x, acc_y
+    agent_features = 5
 
-    obstacle_features = 4  # Base: rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y
-    if include_radius:
-        obstacle_features += 1  # Add radius
-    if include_acceleration:
-        obstacle_features += 2  # Add acc_x, acc_y
+    obstacle_features = 7
 
     if agent_data.shape != (batch_size, agent_features):
         raise ValueError(
