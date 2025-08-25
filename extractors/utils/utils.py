@@ -131,6 +131,7 @@ def validate_observation_tensors(
     mask: torch.Tensor,
     max_obstacles: int,
     include_acceleration: bool = False,
+    include_radius: bool = True,
 ) -> None:
     """
     Validate that input observation tensors have correct shapes and valid values.
@@ -145,8 +146,8 @@ def validate_observation_tensors(
         mask: Tensor of shape [batch_size, max_obstacles] with values in [0, 1]
               indicating obstacle validity (1.0 = valid, 0.0 = invalid/padding)
         max_obstacles: Expected maximum number of obstacles
-        include_acceleration: If True, expects agent[5] and obstacles[7].
-                            If False, expects agent[3] and obstacles[5].
+        include_acceleration: If True, includes acceleration features
+        include_radius: If True, includes radius features
 
     Raises:
         ValueError: If any tensor has incorrect shape, contains NaN/Inf values,
@@ -154,21 +155,31 @@ def validate_observation_tensors(
     """
     batch_size = agent_data.shape[0]
 
-    expected_agent_features = 5 if include_acceleration else 3
-    expected_obstacle_features = 7 if include_acceleration else 5
+    # Calculate expected feature sizes based on flags
+    agent_features = 2  # Base: vel_x, vel_y
+    if include_radius:
+        agent_features += 1  # Add radius
+    if include_acceleration:
+        agent_features += 2  # Add acc_x, acc_y
 
-    if agent_data.shape != (batch_size, expected_agent_features):
+    obstacle_features = 4  # Base: rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y
+    if include_radius:
+        obstacle_features += 1  # Add radius
+    if include_acceleration:
+        obstacle_features += 2  # Add acc_x, acc_y
+
+    if agent_data.shape != (batch_size, agent_features):
         raise ValueError(
-            f"Agent data should have shape ({batch_size}, {expected_agent_features}), got {agent_data.shape}"
+            f"Agent data should have shape ({batch_size}, {agent_features}), got {agent_data.shape}"
         )
 
     if obstacles_data.shape != (
         batch_size,
         max_obstacles,
-        expected_obstacle_features,
+        obstacle_features,
     ):
         raise ValueError(
-            f"Obstacles data should have shape ({batch_size}, {max_obstacles}, {expected_obstacle_features}), got {obstacles_data.shape}"
+            f"Obstacles data should have shape ({batch_size}, {max_obstacles}, {obstacle_features}), got {obstacles_data.shape}"
         )
 
     if target_data.shape != (batch_size, 2):

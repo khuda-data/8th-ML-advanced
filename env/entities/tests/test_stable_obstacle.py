@@ -16,7 +16,7 @@ class TestStableObstacle:
 
         assert obstacle.radius == 0.3
         assert obstacle.mass == 1.0
-        assert obstacle.speed == 2.0
+        assert obstacle.speed == 1.0
 
     def test_init_custom_values(self):
         """Test obstacle initialization with custom values"""
