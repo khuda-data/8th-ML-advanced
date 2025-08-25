@@ -21,7 +21,7 @@ class AttentionExtractor(BaseFeaturesExtractor):
         num_heads: int = 4,
         num_layers: int = 1,
         max_obstacles: int = 10,
-        include_acceleration: bool = False,
+        include_acceleration: bool = True,
         include_radius: bool = True,
         **kwargs,
     ):

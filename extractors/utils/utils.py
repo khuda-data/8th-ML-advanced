@@ -130,7 +130,7 @@ def validate_observation_tensors(
     target_data: torch.Tensor,
     mask: torch.Tensor,
     max_obstacles: int,
-    include_acceleration: bool = False,
+    include_acceleration: bool = True,
     include_radius: bool = True,
 ) -> None:
     """

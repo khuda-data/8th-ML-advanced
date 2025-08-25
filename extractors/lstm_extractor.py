@@ -19,13 +19,14 @@ class LSTMExtractor(BaseFeaturesExtractor):
         observation_space: spaces.Dict,
         *,
         max_obstacles: int = 10,
-        include_acceleration: bool = False,
+        include_acceleration: bool = True,
         include_radius: bool = True,
         lstm_hidden: int = 128,
         lstm_layers: int = 1,
         bidirectional: bool = False,
         use_layernorm: bool = True,
         features_dim: int = 64,
+        **kwargs,
     ) -> None:
         self._max_obstacles = max_obstacles
         self._include_acceleration = include_acceleration

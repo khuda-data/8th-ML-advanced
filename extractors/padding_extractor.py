@@ -13,10 +13,17 @@ from .utils import (
 
 class PaddingExtractor(BaseFeaturesExtractor):
 
-    def __init__(self, observation_space: spaces.Dict, **kwargs):
-        self._max_obstacles = kwargs.get("max_obstacles", 10)
-        self._include_acceleration = kwargs.get("include_acceleration", False)
-        self._include_radius = kwargs.get("include_radius", True)
+    def __init__(
+        self,
+        observation_space: spaces.Dict,
+        max_obstacles=10,
+        include_acceleration=True,
+        include_radius=True,
+        **kwargs,
+    ):
+        self._max_obstacles = max_obstacles
+        self._include_acceleration = include_acceleration
+        self._include_radius = include_radius
 
         agent_features = 2
         if self._include_radius:

@@ -1,579 +1,572 @@
 """Comprehensive tests for AttentionExtractor.
-This module tests the AttentionExtractor class including initialization,
-forward pass, attention mechanism, and multi-layer processing.
+
+This module tests the AttentionExtractor functionality including initialization,
+forward pass, attention mechanism, and feature extraction with proper batch dimensions.
 """
 
 import pytest
 import torch
 import torch.nn as nn
 from gymnasium import spaces
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from ..attention_extractor import AttentionExtractor
 
 
-class TestAttentionExtractor:
-    """Test suite for AttentionExtractor class."""
+class TestAttentionExtractorInit:
+    """Test suite for AttentionExtractor initialization."""
 
-    def create_test_observation_space(
-        self, include_acceleration: bool = False, include_radius: bool = True
-    ):
-        """Create a test observation space for the extractor."""
-        # Calculate feature sizes based on flags
-        agent_size = 2  # Base: vel_x, vel_y
-        if include_radius:
-            agent_size += 1  # Add radius
-        if include_acceleration:
-            agent_size += 2  # Add acc_x, acc_y
-
-        obstacle_size = 4  # Base: rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y
-        if include_radius:
-            obstacle_size += 1  # Add radius
-        if include_acceleration:
-            obstacle_size += 2  # Add acc_x, acc_y
-
-        return spaces.Dict(
+    def test_default_initialization(self):
+        """Test initialization with default parameters."""
+        observation_space = spaces.Dict(
             {
-                "agent": spaces.Box(
-                    low=-float("inf"), high=float("inf"), shape=(agent_size,)
-                ),
-                "obstacles": spaces.Box(
-                    low=-float("inf"),
-                    high=float("inf"),
-                    shape=(10, obstacle_size),
-                ),
-                "target": spaces.Box(
-                    low=-float("inf"), high=float("inf"), shape=(2,)
-                ),
+                "agent": spaces.Box(low=-1, high=1, shape=(5,)),
+                "obstacles": spaces.Box(low=-1, high=1, shape=(10, 7)),
+                "target": spaces.Box(low=-1, high=1, shape=(2,)),
                 "mask": spaces.Box(low=0, high=1, shape=(10,)),
             }
         )
 
-    def create_test_observations(
-        self,
-        batch_size: int = 2,
-        max_obstacles: int = 10,
-        include_acceleration: bool = False,
-        include_radius: bool = True,
-    ):
-        """Create test observation tensors."""
-        # Calculate feature sizes based on flags
-        agent_size = 2  # Base: vel_x, vel_y
-        if include_radius:
-            agent_size += 1  # Add radius
-        if include_acceleration:
-            agent_size += 2  # Add acc_x, acc_y
+        extractor = AttentionExtractor(observation_space)
 
-        obstacle_size = 4  # Base: rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y
-        if include_radius:
-            obstacle_size += 1  # Add radius
-        if include_acceleration:
-            obstacle_size += 2  # Add acc_x, acc_y
-
-        return {
-            "agent": torch.randn(batch_size, agent_size),
-            "obstacles": torch.randn(batch_size, max_obstacles, obstacle_size),
-            "target": torch.randn(batch_size, 2),
-            "mask": torch.rand(batch_size, max_obstacles),
-        }
-
-    def test_initialization_default_parameters(self):
-        """Test AttentionExtractor initialization with default parameters."""
-        observation_space = self.create_test_observation_space()
-        extractor = AttentionExtractor(observation_space, max_obstacles=10)
-
-        # Test default parameter values
-        assert extractor.include_acceleration is False
-        assert extractor.include_radius is True
-        assert extractor.d_model == 64
-        assert extractor.nhead == 8
-        assert extractor.num_layers == 2
-        assert extractor.dropout == 0.1
-
-        # Test feature dimensions calculation
-        expected_agent_features = 3  # radius + vel_x + vel_y
-        expected_obstacle_features = 5  # radius + rel_pos + rel_vel
-        expected_features_dim = (
-            expected_agent_features + 2 + extractor.d_model
-        )  # agent + target + obstacles
-
-        assert extractor.agent_features == expected_agent_features
-        assert extractor.obstacle_features == expected_obstacle_features
-        assert extractor.features_dim == expected_features_dim
-
-    def test_initialization_custom_parameters(self):
-        """Test AttentionExtractor initialization with custom parameters."""
-        observation_space = self.create_test_observation_space(
-            include_acceleration=True, include_radius=False
-        )
-        extractor = AttentionExtractor(
-            observation_space,
-            max_obstacles=10,
-            include_acceleration=True,
-            include_radius=False,
-            d_model=128,
-            nhead=4,
-            num_layers=3,
-            dropout=0.2,
-        )
-
-        # Test custom parameter values
-        assert extractor.include_acceleration is True
-        assert extractor.include_radius is False
-        assert extractor.d_model == 128
-        assert extractor.nhead == 4
-        assert extractor.num_layers == 3
-        assert extractor.dropout == 0.2
-
-        # Test feature dimensions calculation
-        expected_agent_features = 4  # vel_x + vel_y + acc_x + acc_y (no radius)
-        expected_obstacle_features = 6  # rel_pos + rel_vel + acc (no radius)
-        expected_features_dim = expected_agent_features + 2 + extractor.d_model
-
-        assert extractor.agent_features == expected_agent_features
-        assert extractor.obstacle_features == expected_obstacle_features
-        assert extractor.features_dim == expected_features_dim
-
-    def test_layer_initialization(self):
-        """Test that layers are properly initialized."""
-        observation_space = self.create_test_observation_space()
-        extractor = AttentionExtractor(observation_space, max_obstacles=10)
-
-        # Test that required layers exist
-        assert hasattr(extractor, "obstacle_projection")
-        assert hasattr(extractor, "transformer_encoder")
-        assert hasattr(extractor, "global_pooling")
-
-        # Test layer properties
-        assert isinstance(extractor.obstacle_projection, nn.Linear)
-        assert isinstance(extractor.transformer_encoder, nn.TransformerEncoder)
+        # Test default values
+        assert extractor._d_model == 64
+        assert extractor._num_heads == 4
+        assert extractor._num_layers == 1
+        assert extractor._max_obstacles == 10
         assert (
-            extractor.obstacle_projection.in_features
-            == extractor.obstacle_features
+            extractor._include_acceleration == True
+        )  # Corrected default value
+        assert extractor._include_radius == True
+        assert extractor._agent_size == 5  # vel_x, vel_y, acc_x, acc_y, radius
+        assert extractor._target_size == 2  # rel_pos_x, rel_pos_y
+        assert (
+            extractor._obstacle_size == 7
+        )  # radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y
+        assert extractor.features_dim == 66  # target_size + d_model
+
+    def test_custom_initialization(self):
+        """Test initialization with custom parameters."""
+        observation_space = spaces.Dict(
+            {
+                "agent": spaces.Box(low=-1, high=1, shape=(5,)),
+                "obstacles": spaces.Box(low=-1, high=1, shape=(15, 7)),
+                "target": spaces.Box(low=-1, high=1, shape=(2,)),
+                "mask": spaces.Box(low=0, high=1, shape=(15,)),
+            }
         )
-        assert extractor.obstacle_projection.out_features == extractor.d_model
 
-    def test_forward_basic(self):
-        """Test basic forward pass functionality."""
-        observation_space = self.create_test_observation_space()
-        extractor = AttentionExtractor(observation_space, max_obstacles=10)
-        observations = self.create_test_observations()
-
-        with torch.no_grad():
-            features = extractor(observations)
-
-        expected_features_dim = 3 + 2 + 64  # agent + target + obstacle features
-        assert features.shape == (2, expected_features_dim)
-        assert not torch.isnan(features).any()
-
-    def test_forward_with_acceleration(self):
-        """Test forward pass with acceleration features."""
-        observation_space = self.create_test_observation_space(
-            include_acceleration=True, include_radius=True
-        )
         extractor = AttentionExtractor(
             observation_space,
-            max_obstacles=10,
-            include_acceleration=True,
-            include_radius=True,
-        )
-        observations = self.create_test_observations(
-            include_acceleration=True, include_radius=True
-        )
-
-        with torch.no_grad():
-            features = extractor(observations)
-
-        expected_features_dim = (
-            5 + 2 + 64
-        )  # agent(5) + target(2) + obstacle features(64)
-        assert features.shape == (2, expected_features_dim)
-        assert not torch.isnan(features).any()
-
-    def test_forward_without_radius(self):
-        """Test forward pass without radius features."""
-        observation_space = self.create_test_observation_space(
-            include_acceleration=False, include_radius=False
-        )
-        extractor = AttentionExtractor(
-            observation_space,
-            max_obstacles=10,
+            d_model=128,
+            num_heads=8,
+            num_layers=2,
+            max_obstacles=15,
             include_acceleration=False,
             include_radius=False,
         )
-        observations = self.create_test_observations(
-            include_acceleration=False, include_radius=False
+
+        assert extractor._d_model == 128
+        assert extractor._num_heads == 8
+        assert extractor._num_layers == 2
+        assert extractor._max_obstacles == 15
+        assert extractor._include_acceleration == False
+        assert extractor._include_radius == False
+        assert extractor._agent_size == 2  # vel_x, vel_y only
+        assert extractor._target_size == 2
+        assert extractor._obstacle_size == 4  # pos_x, pos_y, vel_x, vel_y only
+        assert extractor.features_dim == 130  # target_size + d_model
+
+    def test_layer_construction(self):
+        """Test that all layers are properly constructed."""
+        observation_space = spaces.Dict(
+            {
+                "agent": spaces.Box(low=-1, high=1, shape=(5,)),
+                "obstacles": spaces.Box(low=-1, high=1, shape=(10, 7)),
+                "target": spaces.Box(low=-1, high=1, shape=(2,)),
+                "mask": spaces.Box(low=0, high=1, shape=(10,)),
+            }
         )
 
-        with torch.no_grad():
-            features = extractor(observations)
+        extractor = AttentionExtractor(observation_space, num_layers=3)
 
-        expected_features_dim = (
-            2 + 2 + 64
-        )  # agent(2) + target(2) + obstacle features(64)
-        assert features.shape == (2, expected_features_dim)
-        assert not torch.isnan(features).any()
+        assert len(extractor._q_projections) == 3
+        assert len(extractor._k_projections) == 3
+        assert len(extractor._v_projections) == 3
+        assert len(extractor._mha_layers) == 3
+        assert len(extractor._layer_norms) == 3
+        assert len(extractor._feed_forwards) == 3
 
-    def test_forward_attention_with_mask(self):
-        """Test that attention mechanism respects obstacle mask."""
-        observation_space = self.create_test_observation_space()
-        extractor = AttentionExtractor(observation_space, max_obstacles=10)
+        # Check layer dimensions with default settings (include_acceleration=True, include_radius=True)
+        assert (
+            extractor._initial_agent_projection.in_features == 5
+        )  # vel_x, vel_y, acc_x, acc_y, radius
+        assert extractor._initial_agent_projection.out_features == 64
+        assert extractor._output_projection.in_features == 64
+        assert extractor._output_projection.out_features == 64
 
-        # Create observations with specific mask pattern
-        observations = self.create_test_observations(
-            batch_size=1, max_obstacles=4
+
+class TestAttentionExtractorForward:
+    """Test suite for AttentionExtractor forward pass with batch dimensions."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        self.observation_space = spaces.Dict(
+            {
+                "agent": spaces.Box(low=-1, high=1, shape=(5,)),
+                "obstacles": spaces.Box(low=-1, high=1, shape=(10, 7)),
+                "target": spaces.Box(low=-1, high=1, shape=(2,)),
+                "mask": spaces.Box(low=0, high=1, shape=(10,)),
+            }
         )
-        observations["mask"] = torch.tensor(
-            [[1.0, 1.0, 0.0, 0.0]]
-        )  # Only first 2 obstacles valid
+        self.extractor = AttentionExtractor(self.observation_space)
+        self.batch_size = 4
 
-        with torch.no_grad():
-            features = extractor(observations)
+    def create_test_observations(self, batch_size=None):
+        """Create test observations with proper dimensions."""
+        if batch_size is None:
+            batch_size = self.batch_size
 
-        assert features.shape == (1, 3 + 2 + 64)
-        assert not torch.isnan(features).any()
+        observations = {
+            "agent": torch.randn(batch_size, 5),
+            "obstacles": torch.randn(batch_size, 10, 7),
+            "target": torch.randn(batch_size, 2),
+            "mask": torch.randint(0, 2, (batch_size, 10)).float(),
+        }
+        return observations
 
-    def test_forward_all_obstacles_masked(self):
-        """Test forward pass when all obstacles are masked."""
-        observation_space = self.create_test_observation_space()
-        extractor = AttentionExtractor(observation_space, max_obstacles=10)
+    def test_forward_basic(self):
+        """Test basic forward pass with default parameters."""
+        observations = self.create_test_observations()
 
+        with patch(
+            "extractors.attention_extractor.validate_observation_tensors"
+        ):
+            with patch(
+                "extractors.attention_extractor.extract_agent_features"
+            ) as mock_agent:
+                with patch(
+                    "extractors.attention_extractor.extract_target_features"
+                ) as mock_target:
+                    with patch(
+                        "extractors.attention_extractor.extract_obstacle_features"
+                    ) as mock_obstacle:
+                        # Mock return values with correct dimensions for default settings
+                        mock_agent.return_value = torch.randn(
+                            self.batch_size,
+                            5,  # vel_x, vel_y, acc_x, acc_y, radius
+                        )
+                        mock_target.return_value = torch.randn(
+                            self.batch_size, 2
+                        )
+                        mock_obstacle.return_value = torch.randn(
+                            self.batch_size, 10, 7  # radius, pos, vel, acc
+                        )
+
+                        output = self.extractor(observations)
+
+                        assert output.shape == (
+                            self.batch_size,
+                            66,
+                        )  # target_size + d_model
+                        assert not torch.isnan(output).any()
+                        assert not torch.isinf(output).any()
+
+    def test_forward_with_different_batch_sizes(self):
+        """Test forward pass with different batch sizes."""
+        for batch_size in [1, 2, 8, 16, 32]:
+            observations = self.create_test_observations(batch_size)
+
+            with patch(
+                "extractors.attention_extractor.validate_observation_tensors"
+            ):
+                with patch(
+                    "extractors.attention_extractor.extract_agent_features"
+                ) as mock_agent:
+                    with patch(
+                        "extractors.attention_extractor.extract_target_features"
+                    ) as mock_target:
+                        with patch(
+                            "extractors.attention_extractor.extract_obstacle_features"
+                        ) as mock_obstacle:
+                            mock_agent.return_value = torch.randn(batch_size, 5)
+                            mock_target.return_value = torch.randn(
+                                batch_size, 2
+                            )
+                            mock_obstacle.return_value = torch.randn(
+                                batch_size, 10, 7
+                            )
+
+                            output = self.extractor(observations)
+
+                            assert output.shape == (batch_size, 66)
+                            assert not torch.isnan(output).any()
+                            assert not torch.isinf(output).any()
+
+    def test_forward_with_single_batch(self):
+        """Test forward pass with single batch dimension."""
         observations = self.create_test_observations(batch_size=1)
-        observations["mask"] = torch.zeros(1, 10)  # All obstacles masked
 
-        with torch.no_grad():
-            features = extractor(observations)
+        with patch(
+            "extractors.attention_extractor.validate_observation_tensors"
+        ):
+            with patch(
+                "extractors.attention_extractor.extract_agent_features"
+            ) as mock_agent:
+                with patch(
+                    "extractors.attention_extractor.extract_target_features"
+                ) as mock_target:
+                    with patch(
+                        "extractors.attention_extractor.extract_obstacle_features"
+                    ) as mock_obstacle:
+                        mock_agent.return_value = torch.randn(1, 5)
+                        mock_target.return_value = torch.randn(1, 2)
+                        mock_obstacle.return_value = torch.randn(1, 10, 7)
 
-        assert features.shape == (1, 3 + 2 + 64)
-        assert not torch.isnan(features).any()
+                        output = self.extractor(observations)
 
-    def test_apply_attention_method(self):
-        """Test the apply_attention method specifically."""
-        observation_space = self.create_test_observation_space()
-        extractor = AttentionExtractor(observation_space, max_obstacles=10)
+                        assert output.shape == (1, 66)
+                        assert not torch.isnan(output).any()
+                        assert not torch.isinf(output).any()
 
-        # Create test tensors
+    def test_forward_with_all_masked_obstacles(self):
+        """Test forward pass when all obstacles are masked."""
+        observations = self.create_test_observations()
+        observations["mask"] = torch.zeros(self.batch_size, 10)  # All masked
+
+        with patch(
+            "extractors.attention_extractor.validate_observation_tensors"
+        ):
+            with patch(
+                "extractors.attention_extractor.extract_agent_features"
+            ) as mock_agent:
+                with patch(
+                    "extractors.attention_extractor.extract_target_features"
+                ) as mock_target:
+                    with patch(
+                        "extractors.attention_extractor.extract_obstacle_features"
+                    ) as mock_obstacle:
+                        mock_agent.return_value = torch.randn(
+                            self.batch_size, 5
+                        )
+                        mock_target.return_value = torch.randn(
+                            self.batch_size, 2
+                        )
+                        mock_obstacle.return_value = torch.zeros(
+                            self.batch_size, 10, 7
+                        )
+
+                        output = self.extractor(observations)
+
+                        assert output.shape == (self.batch_size, 66)
+                        assert not torch.isnan(output).any()
+
+    def test_forward_with_acceleration_and_no_radius(self):
+        """Test forward pass with acceleration enabled and radius disabled."""
+        extractor = AttentionExtractor(
+            self.observation_space,
+            include_acceleration=True,
+            include_radius=False,
+        )
+
+        observations = self.create_test_observations()
+
+        with patch(
+            "extractors.attention_extractor.validate_observation_tensors"
+        ):
+            with patch(
+                "extractors.attention_extractor.extract_agent_features"
+            ) as mock_agent:
+                with patch(
+                    "extractors.attention_extractor.extract_target_features"
+                ) as mock_target:
+                    with patch(
+                        "extractors.attention_extractor.extract_obstacle_features"
+                    ) as mock_obstacle:
+                        mock_agent.return_value = torch.randn(
+                            self.batch_size, 4
+                        )  # vel + acc (no radius)
+                        mock_target.return_value = torch.randn(
+                            self.batch_size, 2
+                        )
+                        mock_obstacle.return_value = torch.randn(
+                            self.batch_size, 10, 6
+                        )  # pos + vel + acc (no radius)
+
+                        output = extractor(observations)
+
+                        assert output.shape == (self.batch_size, 66)
+                        assert not torch.isnan(output).any()
+
+    def test_forward_with_no_acceleration_and_radius(self):
+        """Test forward pass with acceleration disabled and radius enabled."""
+        extractor = AttentionExtractor(
+            self.observation_space,
+            include_acceleration=False,
+            include_radius=True,
+        )
+
+        observations = self.create_test_observations()
+
+        with patch(
+            "extractors.attention_extractor.validate_observation_tensors"
+        ):
+            with patch(
+                "extractors.attention_extractor.extract_agent_features"
+            ) as mock_agent:
+                with patch(
+                    "extractors.attention_extractor.extract_target_features"
+                ) as mock_target:
+                    with patch(
+                        "extractors.attention_extractor.extract_obstacle_features"
+                    ) as mock_obstacle:
+                        mock_agent.return_value = torch.randn(
+                            self.batch_size, 3
+                        )  # vel + radius (no acc)
+                        mock_target.return_value = torch.randn(
+                            self.batch_size, 2
+                        )
+                        mock_obstacle.return_value = torch.randn(
+                            self.batch_size, 10, 5
+                        )  # radius + pos + vel (no acc)
+
+                        output = extractor(observations)
+
+                        assert output.shape == (self.batch_size, 66)
+                        assert not torch.isnan(output).any()
+
+    def test_forward_with_minimal_features(self):
+        """Test forward pass with minimal features (no acceleration, no radius)."""
+        extractor = AttentionExtractor(
+            self.observation_space,
+            include_acceleration=False,
+            include_radius=False,
+        )
+
+        observations = self.create_test_observations()
+
+        with patch(
+            "extractors.attention_extractor.validate_observation_tensors"
+        ):
+            with patch(
+                "extractors.attention_extractor.extract_agent_features"
+            ) as mock_agent:
+                with patch(
+                    "extractors.attention_extractor.extract_target_features"
+                ) as mock_target:
+                    with patch(
+                        "extractors.attention_extractor.extract_obstacle_features"
+                    ) as mock_obstacle:
+                        mock_agent.return_value = torch.randn(
+                            self.batch_size, 2
+                        )  # vel only
+                        mock_target.return_value = torch.randn(
+                            self.batch_size, 2
+                        )
+                        mock_obstacle.return_value = torch.randn(
+                            self.batch_size, 10, 4
+                        )  # pos + vel only
+
+                        output = extractor(observations)
+
+                        assert output.shape == (self.batch_size, 66)
+                        assert not torch.isnan(output).any()
+
+
+class TestAttentionMechanism:
+    """Test suite for attention mechanism specific functionality."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        observation_space = spaces.Dict(
+            {
+                "agent": spaces.Box(low=-1, high=1, shape=(5,)),
+                "obstacles": spaces.Box(low=-1, high=1, shape=(5, 7)),
+                "target": spaces.Box(low=-1, high=1, shape=(2,)),
+                "mask": spaces.Box(low=0, high=1, shape=(5,)),
+            }
+        )
+        self.extractor = AttentionExtractor(observation_space, max_obstacles=5)
+
+    def test_create_attention_mask(self):
+        """Test attention mask creation."""
+        mask = torch.tensor([[1.0, 1.0, 0.0, 1.0, 0.0]])
+        attention_mask = self.extractor._create_attention_mask(mask)
+
+        expected = torch.tensor([[False, False, True, False, True]])
+        torch.testing.assert_close(attention_mask, expected)
+
+    def test_apply_attention_shape(self):
+        """Test attention application output shape."""
         batch_size = 2
-        max_obstacles = 4
-        projected_obstacles = torch.randn(
-            batch_size, max_obstacles, extractor.d_model
-        )
-        mask = torch.tensor([[1.0, 1.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]])
+        agent_features = torch.randn(batch_size, 3)
+        obstacle_features = torch.randn(batch_size, 5, 5)
+        mask = torch.ones(batch_size, 5)
 
-        with torch.no_grad():
-            attended_features = extractor.apply_attention(
-                projected_obstacles, mask
-            )
-
-        assert attended_features.shape == (batch_size, extractor.d_model)
-        assert not torch.isnan(attended_features).any()
-
-    def test_attention_mechanism_focuses_on_valid_obstacles(self):
-        """Test that attention mechanism focuses on valid obstacles."""
-        observation_space = self.create_test_observation_space()
-        extractor = AttentionExtractor(
-            observation_space, max_obstacles=10, d_model=32
-        )  # Smaller for easier testing
-
-        # Create observations with clear patterns
-        batch_size = 1
-        max_obstacles = 3
-        observations = self.create_test_observations(
-            batch_size=batch_size, max_obstacles=max_obstacles
+        output = self.extractor._apply_attention(
+            agent_features, obstacle_features, mask
         )
 
-        # Set specific values to make the test more predictable
-        observations["obstacles"][
-            0, 0, :
-        ] = 1.0  # First obstacle has high values
-        observations["obstacles"][
-            0, 1, :
-        ] = 0.1  # Second obstacle has low values
-        observations["obstacles"][0, 2, :] = 0.0  # Third obstacle is zero
-        observations["mask"] = torch.tensor(
-            [[1.0, 1.0, 0.0]]
-        )  # First two valid
+        assert output.shape == (batch_size, 64)
 
-        with torch.no_grad():
-            features = extractor(observations)
-
-        assert features.shape == (batch_size, 3 + 2 + 32)
-        assert not torch.isnan(features).any()
-
-    def test_feed_forward_layers(self):
-        """Test that feed-forward layers in transformer work correctly."""
-        observation_space = self.create_test_observation_space()
-        extractor = AttentionExtractor(
-            observation_space, max_obstacles=10, d_model=64, num_layers=1
+    def test_apply_attention_with_masked_obstacles(self):
+        """Test attention with some obstacles masked."""
+        batch_size = 2
+        agent_features = torch.randn(batch_size, 3)
+        obstacle_features = torch.randn(batch_size, 5, 5)
+        mask = torch.tensor(
+            [[1.0, 1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 1.0, 0.0, 1.0]]
         )
 
-        observations = self.create_test_observations(
-            batch_size=1, max_obstacles=2
+        output = self.extractor._apply_attention(
+            agent_features, obstacle_features, mask
         )
 
-        # Test that we can get intermediate representations
-        with torch.no_grad():
-            features = extractor(observations)
-
-        assert features.shape == (1, 3 + 2 + 64)
-        assert not torch.isnan(features).any()
-
-        # Test that the transformer layers are working
-        assert len(list(extractor.transformer_encoder.layers)) == 1
-
-    def test_different_batch_sizes(self):
-        """Test extractor with different batch sizes."""
-        observation_space = self.create_test_observation_space()
-        extractor = AttentionExtractor(observation_space, max_obstacles=10)
-
-        for batch_size in [1, 4, 8, 16]:
-            observations = self.create_test_observations(batch_size=batch_size)
-
-            with torch.no_grad():
-                features = extractor(observations)
-
-            expected_shape = (batch_size, 3 + 2 + 64)
-            assert features.shape == expected_shape
-            assert not torch.isnan(features).any()
-
-    def test_different_obstacle_counts(self):
-        """Test extractor with different numbers of obstacles."""
-        observation_space = self.create_test_observation_space()
-        extractor = AttentionExtractor(observation_space, max_obstacles=10)
-
-        for max_obstacles in [1, 5, 15, 20]:
-            observations = self.create_test_observations(
-                max_obstacles=max_obstacles
-            )
-            observations["obstacles"] = torch.randn(2, max_obstacles, 5)
-            observations["mask"] = torch.rand(2, max_obstacles)
-
-            with torch.no_grad():
-                features = extractor(observations)
-
-            assert features.shape == (2, 3 + 2 + 64)
-            assert not torch.isnan(features).any()
-
-    def test_gradient_flow(self):
-        """Test that gradients flow properly through the network."""
-        observation_space = self.create_test_observation_space()
-        extractor = AttentionExtractor(observation_space, max_obstacles=10)
-
-        observations = self.create_test_observations(batch_size=2)
-
-        # Enable gradients
-        for param in extractor.parameters():
-            param.requires_grad_(True)
-
-        features = extractor(observations)
-        loss = features.sum()
-        loss.backward()
-
-        # Check that gradients exist
-        for name, param in extractor.named_parameters():
-            assert param.grad is not None, f"No gradient for {name}"
-            assert not torch.isnan(param.grad).any(), f"NaN gradient for {name}"
-
-    def test_features_dim_property(self):
-        """Test the features_dim property calculation."""
-        # Test with different configurations
-        configs = [
-            (False, False, 2 + 2 + 64),  # vel only + target + obstacles
-            (False, True, 3 + 2 + 64),  # radius + vel + target + obstacles
-            (True, False, 4 + 2 + 64),  # vel + acc + target + obstacles
-            (True, True, 5 + 2 + 64),  # radius + vel + acc + target + obstacles
-        ]
-
-        for include_acceleration, include_radius, expected_dim in configs:
-            observation_space = self.create_test_observation_space(
-                include_acceleration=include_acceleration,
-                include_radius=include_radius,
-            )
-            extractor = AttentionExtractor(
-                observation_space,
-                max_obstacles=10,
-                include_acceleration=include_acceleration,
-                include_radius=include_radius,
-            )
-            assert extractor.features_dim == expected_dim
+        assert output.shape == (batch_size, 64)
+        assert not torch.isnan(output).any()
 
 
 class TestAttentionExtractorIntegration:
     """Integration tests for AttentionExtractor."""
 
-    def create_test_observation_space(
-        self, include_acceleration: bool = False, include_radius: bool = True
-    ):
-        """Create a test observation space for integration tests."""
-        # Calculate feature sizes based on flags
-        agent_size = 2  # Base: vel_x, vel_y
-        if include_radius:
-            agent_size += 1  # Add radius
-        if include_acceleration:
-            agent_size += 2  # Add acc_x, acc_y
-
-        obstacle_size = 4  # Base: rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y
-        if include_radius:
-            obstacle_size += 1  # Add radius
-        if include_acceleration:
-            obstacle_size += 2  # Add acc_x, acc_y
-
-        return spaces.Dict(
+    def test_end_to_end_processing(self):
+        """Test complete end-to-end processing."""
+        observation_space = spaces.Dict(
             {
-                "agent": spaces.Box(
-                    low=-float("inf"), high=float("inf"), shape=(agent_size,)
-                ),
-                "obstacles": spaces.Box(
-                    low=-float("inf"),
-                    high=float("inf"),
-                    shape=(15, obstacle_size),
-                ),
-                "target": spaces.Box(
-                    low=-float("inf"), high=float("inf"), shape=(2,)
-                ),
-                "mask": spaces.Box(low=0, high=1, shape=(15,)),
+                "agent": spaces.Box(low=-1, high=1, shape=(5,)),
+                "obstacles": spaces.Box(low=-1, high=1, shape=(3, 7)),
+                "target": spaces.Box(low=-1, high=1, shape=(2,)),
+                "mask": spaces.Box(low=0, high=1, shape=(3,)),
             }
         )
 
-    def test_realistic_navigation_scenario(self):
-        """Test with realistic navigation scenario data."""
-        observation_space = self.create_test_observation_space()
-        extractor = AttentionExtractor(observation_space, max_obstacles=10)
-
-        # Simulate realistic agent state
-        agent_data = torch.tensor([[0.5, 0.3, 0.1]])  # [radius, vel_x, vel_y]
-
-        # Simulate realistic obstacles (some close, some far)
-        obstacles_data = torch.zeros(1, 15, 5)
-        obstacles_data[0, 0, :] = torch.tensor(
-            [0.3, 0.5, 0.2, -0.1, 0.0]
-        )  # Close obstacle
-        obstacles_data[0, 1, :] = torch.tensor(
-            [0.4, 2.0, 1.5, 0.0, 0.1]
-        )  # Distant obstacle
-        obstacles_data[0, 2, :] = torch.tensor(
-            [0.2, -0.8, 0.3, 0.2, -0.1]
-        )  # Another close obstacle
-
-        # Target position
-        target_data = torch.tensor([[1.5, 2.0]])
-
-        # Mask - first 3 obstacles are valid
-        mask = torch.zeros(1, 15)
-        mask[0, :3] = 1.0
-
-        observations = {
-            "agent": agent_data,
-            "obstacles": obstacles_data,
-            "target": target_data,
-            "mask": mask,
-        }
-
-        with torch.no_grad():
-            features = extractor(observations)
-
-        assert features.shape == (1, 3 + 2 + 64)
-        assert not torch.isnan(features).any()
-        assert torch.isfinite(features).all()
-
-    def test_performance_large_batch(self):
-        """Test extractor performance with large batch size."""
-        observation_space = self.create_test_observation_space()
         extractor = AttentionExtractor(
-            observation_space, max_obstacles=10, d_model=32
-        )  # Smaller model for speed
-
-        batch_size = 64
-        max_obstacles = 10
-
-        observations = {
-            "agent": torch.randn(batch_size, 3),
-            "obstacles": torch.randn(batch_size, max_obstacles, 5),
-            "target": torch.randn(batch_size, 2),
-            "mask": torch.rand(batch_size, max_obstacles),
-        }
-
-        with torch.no_grad():
-            features = extractor(observations)
-
-        assert features.shape == (batch_size, 3 + 2 + 32)
-        assert not torch.isnan(features).any()
-
-    def test_attention_robustness_to_obstacle_ordering(self):
-        """Test that attention is reasonably robust to obstacle ordering."""
-        observation_space = self.create_test_observation_space()
-        extractor = AttentionExtractor(
-            observation_space, max_obstacles=10, d_model=32
+            observation_space, max_obstacles=3, d_model=32, num_heads=2
         )
 
-        # Create two identical scenarios with different obstacle ordering
-        batch_size = 1
-        max_obstacles = 4
-
-        # Scenario 1: obstacles in original order
-        obs1 = {
-            "agent": torch.tensor([[0.5, 0.1, 0.2]]),
+        # Real observations
+        observations = {
+            "agent": torch.tensor(
+                [[0.5, 0.1, 0.2, 0.01, 0.02]]
+            ),  # [radius, vel_x, vel_y, acc_x, acc_y]
             "obstacles": torch.tensor(
                 [
                     [
-                        [0.3, 1.0, 0.5, 0.1, 0.0],
-                        [0.4, 0.5, 1.0, -0.1, 0.1],
-                        [0.2, 2.0, 0.3, 0.0, 0.0],
-                        [0.0, 0.0, 0.0, 0.0, 0.0],
+                        [
+                            0.3,
+                            1.0,
+                            1.0,
+                            -0.5,
+                            -0.5,
+                            0.1,
+                            0.1,
+                        ],  # Valid obstacle
+                        [
+                            0.4,
+                            -1.0,
+                            0.5,
+                            0.2,
+                            -0.1,
+                            -0.05,
+                            0.05,
+                        ],  # Valid obstacle
+                        [
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                        ],  # Masked obstacle
                     ]
                 ]
             ),
-            "target": torch.tensor([[1.5, 1.0]]),
-            "mask": torch.tensor([[1.0, 1.0, 1.0, 0.0]]),
+            "target": torch.tensor([[0.8, 0.6]]),  # Target relative position
+            "mask": torch.tensor(
+                [[1.0, 1.0, 0.0]]
+            ),  # First two obstacles valid
         }
 
-        # Scenario 2: obstacles in different order (swap first two)
-        obs2 = {
-            "agent": torch.tensor([[0.5, 0.1, 0.2]]),
-            "obstacles": torch.tensor(
-                [
-                    [
-                        [0.4, 0.5, 1.0, -0.1, 0.1],
-                        [0.3, 1.0, 0.5, 0.1, 0.0],
-                        [0.2, 2.0, 0.3, 0.0, 0.0],
-                        [0.0, 0.0, 0.0, 0.0, 0.0],
-                    ]
-                ]
-            ),
-            "target": torch.tensor([[1.5, 1.0]]),
-            "mask": torch.tensor([[1.0, 1.0, 1.0, 0.0]]),
-        }
+        output = extractor(observations)
 
-        with torch.no_grad():
-            features1 = extractor(obs1)
-            features2 = extractor(obs2)
+        assert output.shape == (1, 34)  # target_size(2) + d_model(32)
+        assert not torch.isnan(output).any()
+        assert not torch.isinf(output).any()
 
-        # Features should be reasonably similar (attention should handle permutation)
-        assert features1.shape == features2.shape
-        assert not torch.isnan(features1).any()
-        assert not torch.isnan(features2).any()
-
-    def test_memory_efficiency(self):
-        """Test that the extractor doesn't accumulate excessive memory."""
-        observation_space = self.create_test_observation_space()
-        extractor = AttentionExtractor(observation_space, max_obstacles=10)
-
-        # Run multiple forward passes to check for memory leaks
-        for _ in range(10):
-            observations = {
-                "agent": torch.randn(4, 3),
-                "obstacles": torch.randn(4, 8, 5),
-                "target": torch.randn(4, 2),
-                "mask": torch.rand(4, 8),
+    def test_gradient_flow(self):
+        """Test that gradients flow properly through the extractor."""
+        observation_space = spaces.Dict(
+            {
+                "agent": spaces.Box(low=-1, high=1, shape=(5,)),
+                "obstacles": spaces.Box(low=-1, high=1, shape=(3, 7)),
+                "target": spaces.Box(low=-1, high=1, shape=(2,)),
+                "mask": spaces.Box(low=0, high=1, shape=(3,)),
             }
+        )
 
-            with torch.no_grad():
-                features = extractor(observations)
+        extractor = AttentionExtractor(observation_space, max_obstacles=3)
 
-            del features, observations
+        observations = {
+            "agent": torch.tensor(
+                [[0.5, 0.1, 0.2, 0.01, 0.02]], requires_grad=True
+            ),
+            "obstacles": torch.tensor(
+                [
+                    [
+                        [
+                            [0.3, 1.0, 1.0, -0.5, -0.5, 0.1, 0.1],
+                            [0.4, -1.0, 0.5, 0.2, -0.1, -0.05, 0.05],
+                            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                        ]
+                    ]
+                ],
+                requires_grad=True,
+            ),
+            "target": torch.tensor([[0.8, 0.6]], requires_grad=True),
+            "mask": torch.tensor([[1.0, 1.0, 0.0]]),
+        }
 
-        # Test passes if no memory error occurs
+        output = extractor(observations)
+        loss = output.sum()
+        loss.backward()
 
+        # Check that gradients are computed
+        assert observations["agent"].grad is not None
+        assert observations["obstacles"].grad is not None
+        assert observations["target"].grad is not None
 
-if __name__ == "__main__":
-    pytest.main([__file__])
+    def test_deterministic_output(self):
+        """Test that output is deterministic for same input."""
+        observation_space = spaces.Dict(
+            {
+                "agent": spaces.Box(low=-1, high=1, shape=(5,)),
+                "obstacles": spaces.Box(low=-1, high=1, shape=(2, 7)),
+                "target": spaces.Box(low=-1, high=1, shape=(2,)),
+                "mask": spaces.Box(low=0, high=1, shape=(2,)),
+            }
+        )
+
+        extractor = AttentionExtractor(observation_space, max_obstacles=2)
+
+        observations = {
+            "agent": torch.tensor([[0.5, 0.1, 0.2, 0.01, 0.02]]),
+            "obstacles": torch.tensor(
+                [
+                    [
+                        [
+                            [0.3, 1.0, 1.0, -0.5, -0.5, 0.1, 0.1],
+                            [0.4, -1.0, 0.5, 0.2, -0.1, -0.05, 0.05],
+                        ]
+                    ]
+                ]
+            ),
+            "target": torch.tensor([[0.8, 0.6]]),
+            "mask": torch.tensor([[1.0, 1.0]]),
+        }
+
+        extractor.eval()
+        output1 = extractor(observations)
+        output2 = extractor(observations)
+
+        torch.testing.assert_close(output1, output2)

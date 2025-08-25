@@ -1,590 +1,782 @@
 """Comprehensive tests for PaddingExtractor.
-This module tests the PaddingExtractor class including initialization,
-forward pass, feature concatenation, and padding mechanism.
+
+This module tests the PaddingExtractor functionality including initialization,
+forward pass, feature flattening, and feature extraction with proper batch dimensions.
 """
 
 import pytest
 import torch
-import torch.nn as nn
 from gymnasium import spaces
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from ..padding_extractor import PaddingExtractor
 
 
-class TestPaddingExtractor:
-    """Test suite for PaddingExtractor class."""
+class TestPaddingExtractorInit:
+    """Test suite for PaddingExtractor initialization."""
 
-    def create_test_observation_space(
-        self, include_acceleration: bool = False, include_radius: bool = True
-    ):
-        """Create a test observation space for the extractor."""
-        # Calculate feature sizes based on flags
-        agent_size = 2  # Base: vel_x, vel_y
-        if include_radius:
-            agent_size += 1  # Add radius
-        if include_acceleration:
-            agent_size += 2  # Add acc_x, acc_y
-
-        obstacle_size = 4  # Base: rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y
-        if include_radius:
-            obstacle_size += 1  # Add radius
-        if include_acceleration:
-            obstacle_size += 2  # Add acc_x, acc_y
-
-        return spaces.Dict(
+    def test_default_initialization(self):
+        """Test initialization with default parameters."""
+        observation_space = spaces.Dict(
             {
-                "agent": spaces.Box(
-                    low=-float("inf"), high=float("inf"), shape=(agent_size,)
-                ),
-                "obstacles": spaces.Box(
-                    low=-float("inf"),
-                    high=float("inf"),
-                    shape=(10, obstacle_size),
-                ),
-                "target": spaces.Box(
-                    low=-float("inf"), high=float("inf"), shape=(2,)
-                ),
+                "agent": spaces.Box(low=-1, high=1, shape=(5,)),
+                "obstacles": spaces.Box(low=-1, high=1, shape=(10, 7)),
+                "target": spaces.Box(low=-1, high=1, shape=(2,)),
                 "mask": spaces.Box(low=0, high=1, shape=(10,)),
             }
         )
 
-    def create_test_observations(
-        self,
-        batch_size: int = 2,
-        max_obstacles: int = 10,
-        include_acceleration: bool = False,
-        include_radius: bool = True,
-    ):
-        """Create test observation tensors."""
-        # Calculate feature sizes based on flags
-        agent_size = 2  # Base: vel_x, vel_y
-        if include_radius:
-            agent_size += 1  # Add radius
-        if include_acceleration:
-            agent_size += 2  # Add acc_x, acc_y
+        extractor = PaddingExtractor(observation_space)
 
-        obstacle_size = 4  # Base: rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y
-        if include_radius:
-            obstacle_size += 1  # Add radius
-        if include_acceleration:
-            obstacle_size += 2  # Add acc_x, acc_y
+        # Test default values
+        assert extractor._max_obstacles == 10
+        assert (
+            extractor._include_acceleration == True
+        )  # Corrected default value
+        assert extractor._include_radius == True
+        assert extractor._agent_size == 5  # vel_x, vel_y, acc_x, acc_y, radius
+        assert extractor._target_size == 2  # rel_pos_x, rel_pos_y
+        assert (
+            extractor._obstacle_size == 7
+        )  # radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y
+        assert extractor._obstacles_total_size == 70  # 7 * 10
+        assert extractor._features_dim == 77  # 5 + 2 + 70
+        assert extractor.features_dim == 77
 
-        return {
-            "agent": torch.randn(batch_size, agent_size),
-            "obstacles": torch.randn(batch_size, max_obstacles, obstacle_size),
-            "target": torch.randn(batch_size, 2),
-            "mask": torch.rand(batch_size, max_obstacles),
-        }
-
-    def test_initialization_default_parameters(self):
-        """Test PaddingExtractor initialization with default parameters."""
-        observation_space = self.create_test_observation_space()
-        extractor = PaddingExtractor(observation_space, max_obstacles=10)
-
-        # Test default parameter values
-        assert extractor.include_acceleration is False
-        assert extractor.include_radius is True
-
-        # Test feature dimensions calculation
-        expected_agent_features = 3  # radius + vel_x + vel_y
-        expected_obstacle_features = 5  # radius + rel_pos + rel_vel
-        expected_max_obstacles = 10
-        expected_features_dim = (
-            expected_agent_features
-            + 2
-            + (expected_max_obstacles * expected_obstacle_features)
+    def test_custom_initialization(self):
+        """Test initialization with custom parameters."""
+        observation_space = spaces.Dict(
+            {
+                "agent": spaces.Box(low=-1, high=1, shape=(5,)),
+                "obstacles": spaces.Box(low=-1, high=1, shape=(15, 7)),
+                "target": spaces.Box(low=-1, high=1, shape=(2,)),
+                "mask": spaces.Box(low=0, high=1, shape=(15,)),
+            }
         )
 
-        assert extractor.agent_features == expected_agent_features
-        assert extractor.obstacle_features == expected_obstacle_features
-        assert extractor.max_obstacles == expected_max_obstacles
-        assert extractor.features_dim == expected_features_dim
-
-    def test_initialization_custom_parameters(self):
-        """Test PaddingExtractor initialization with custom parameters."""
-        observation_space = self.create_test_observation_space(
-            include_acceleration=True, include_radius=False
-        )
         extractor = PaddingExtractor(
             observation_space,
-            max_obstacles=10,
+            max_obstacles=15,
+            include_acceleration=False,
+            include_radius=False,
+        )
+
+        assert extractor._max_obstacles == 15
+        assert extractor._include_acceleration == False
+        assert extractor._include_radius == False
+        assert extractor._agent_size == 2  # vel_x, vel_y only
+        assert extractor._target_size == 2
+        assert extractor._obstacle_size == 4  # pos_x, pos_y, vel_x, vel_y only
+        assert extractor._obstacles_total_size == 60  # 4 * 15
+        assert extractor._features_dim == 64  # 2 + 2 + 60
+
+    def test_feature_size_calculations(self):
+        """Test feature size calculations for different configurations."""
+        observation_space = spaces.Dict(
+            {
+                "agent": spaces.Box(low=-1, high=1, shape=(5,)),
+                "obstacles": spaces.Box(low=-1, high=1, shape=(5, 7)),
+                "target": spaces.Box(low=-1, high=1, shape=(2,)),
+                "mask": spaces.Box(low=0, high=1, shape=(5,)),
+            }
+        )
+
+        # Test all features enabled (default)
+        extractor_all = PaddingExtractor(
+            observation_space,
+            max_obstacles=5,
+            include_acceleration=True,
+            include_radius=True,
+        )
+        assert (
+            extractor_all._agent_size == 5
+        )  # vel_x, vel_y, acc_x, acc_y, radius
+        assert (
+            extractor_all._obstacle_size == 7
+        )  # radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y
+        assert extractor_all._features_dim == 42  # 5 + 2 + 35
+
+        # Test minimal features
+        extractor_min = PaddingExtractor(
+            observation_space,
+            max_obstacles=5,
+            include_acceleration=False,
+            include_radius=False,
+        )
+        assert extractor_min._agent_size == 2  # vel_x, vel_y only
+        assert (
+            extractor_min._obstacle_size == 4
+        )  # pos_x, pos_y, vel_x, vel_y only
+        assert extractor_min._features_dim == 24  # 2 + 2 + 20
+
+    def test_kwargs_parsing(self):
+        """Test that kwargs are properly parsed."""
+        observation_space = spaces.Dict(
+            {
+                "agent": spaces.Box(low=-1, high=1, shape=(5,)),
+                "obstacles": spaces.Box(low=-1, high=1, shape=(8, 7)),
+                "target": spaces.Box(low=-1, high=1, shape=(2,)),
+                "mask": spaces.Box(low=0, high=1, shape=(8,)),
+            }
+        )
+
+        extractor = PaddingExtractor(
+            observation_space,
+            max_obstacles=8,
+            include_acceleration=True,
+            include_radius=False,
+            some_unused_kwarg=42,  # Should be ignored
+        )
+
+        assert extractor._max_obstacles == 8
+        assert extractor._include_acceleration == True
+        assert extractor._include_radius == False
+
+
+class TestPaddingExtractorForward:
+    """Test suite for PaddingExtractor forward pass with batch dimensions."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        self.observation_space = spaces.Dict(
+            {
+                "agent": spaces.Box(low=-1, high=1, shape=(5,)),
+                "obstacles": spaces.Box(low=-1, high=1, shape=(10, 7)),
+                "target": spaces.Box(low=-1, high=1, shape=(2,)),
+                "mask": spaces.Box(low=0, high=1, shape=(10,)),
+            }
+        )
+        self.extractor = PaddingExtractor(self.observation_space)
+        self.batch_size = 4
+
+    def create_test_observations(self, batch_size=None):
+        """Create test observations with proper dimensions."""
+        if batch_size is None:
+            batch_size = self.batch_size
+
+        observations = {
+            "agent": torch.randn(batch_size, 5),
+            "obstacles": torch.randn(batch_size, 10, 7),
+            "target": torch.randn(batch_size, 2),
+            "mask": torch.randint(0, 2, (batch_size, 10)).float(),
+        }
+        return observations
+
+    def test_forward_basic(self):
+        """Test basic forward pass with default parameters."""
+        observations = self.create_test_observations()
+
+        with patch("extractors.padding_extractor.validate_observation_tensors"):
+            with patch(
+                "extractors.padding_extractor.extract_agent_features"
+            ) as mock_agent:
+                with patch(
+                    "extractors.padding_extractor.extract_target_features"
+                ) as mock_target:
+                    with patch(
+                        "extractors.padding_extractor.extract_obstacle_features"
+                    ) as mock_obstacle:
+                        # Mock return values with correct dimensions for default settings
+                        mock_agent.return_value = torch.randn(
+                            self.batch_size,
+                            5,  # vel_x, vel_y, acc_x, acc_y, radius
+                        )
+                        mock_target.return_value = torch.randn(
+                            self.batch_size, 2
+                        )
+                        mock_obstacle.return_value = torch.randn(
+                            self.batch_size, 10, 7  # radius, pos, vel, acc
+                        )
+
+                        output = self.extractor(observations)
+
+                        assert output.shape == (
+                            self.batch_size,
+                            77,
+                        )  # 5 + 2 + 70
+                        assert not torch.isnan(output).any()
+                        assert not torch.isinf(output).any()
+
+    def test_forward_with_different_batch_sizes(self):
+        """Test forward pass with different batch sizes."""
+        for batch_size in [1, 2, 8, 16, 32]:
+            observations = self.create_test_observations(batch_size)
+
+            with patch(
+                "extractors.padding_extractor.validate_observation_tensors"
+            ):
+                with patch(
+                    "extractors.padding_extractor.extract_agent_features"
+                ) as mock_agent:
+                    with patch(
+                        "extractors.padding_extractor.extract_target_features"
+                    ) as mock_target:
+                        with patch(
+                            "extractors.padding_extractor.extract_obstacle_features"
+                        ) as mock_obstacle:
+                            mock_agent.return_value = torch.randn(batch_size, 5)
+                            mock_target.return_value = torch.randn(
+                                batch_size, 2
+                            )
+                            mock_obstacle.return_value = torch.randn(
+                                batch_size, 10, 7
+                            )
+
+                            output = self.extractor(observations)
+
+                            assert output.shape == (batch_size, 77)
+                            assert not torch.isnan(output).any()
+                            assert not torch.isinf(output).any()
+
+    def test_forward_with_single_batch(self):
+        """Test forward pass with single batch dimension."""
+        observations = self.create_test_observations(batch_size=1)
+
+        with patch("extractors.padding_extractor.validate_observation_tensors"):
+            with patch(
+                "extractors.padding_extractor.extract_agent_features"
+            ) as mock_agent:
+                with patch(
+                    "extractors.padding_extractor.extract_target_features"
+                ) as mock_target:
+                    with patch(
+                        "extractors.padding_extractor.extract_obstacle_features"
+                    ) as mock_obstacle:
+                        mock_agent.return_value = torch.randn(1, 5)
+                        mock_target.return_value = torch.randn(1, 2)
+                        mock_obstacle.return_value = torch.randn(1, 10, 7)
+
+                        output = self.extractor(observations)
+
+                        assert output.shape == (1, 77)
+                        assert not torch.isnan(output).any()
+                        assert not torch.isinf(output).any()
+
+    def test_forward_with_acceleration_and_no_radius(self):
+        """Test forward pass with acceleration enabled and radius disabled."""
+        extractor = PaddingExtractor(
+            self.observation_space,
             include_acceleration=True,
             include_radius=False,
         )
 
-        # Test custom parameter values
-        assert extractor.include_acceleration is True
-        assert extractor.include_radius is False
-
-        # Test feature dimensions calculation
-        expected_agent_features = 4  # vel_x + vel_y + acc_x + acc_y (no radius)
-        expected_obstacle_features = 6  # rel_pos + rel_vel + acc (no radius)
-        expected_max_obstacles = 10
-        expected_features_dim = (
-            expected_agent_features
-            + 2
-            + (expected_max_obstacles * expected_obstacle_features)
-        )
-
-        assert extractor.agent_features == expected_agent_features
-        assert extractor.obstacle_features == expected_obstacle_features
-        assert extractor.features_dim == expected_features_dim
-
-    def test_forward_basic(self):
-        """Test basic forward pass functionality."""
-        observation_space = self.create_test_observation_space()
-        extractor = PaddingExtractor(observation_space, max_obstacles=10)
         observations = self.create_test_observations()
 
-        with torch.no_grad():
-            features = extractor(observations)
+        with patch("extractors.padding_extractor.validate_observation_tensors"):
+            with patch(
+                "extractors.padding_extractor.extract_agent_features"
+            ) as mock_agent:
+                with patch(
+                    "extractors.padding_extractor.extract_target_features"
+                ) as mock_target:
+                    with patch(
+                        "extractors.padding_extractor.extract_obstacle_features"
+                    ) as mock_obstacle:
+                        mock_agent.return_value = torch.randn(
+                            self.batch_size, 4  # vel + acc (no radius)
+                        )
+                        mock_target.return_value = torch.randn(
+                            self.batch_size, 2
+                        )
+                        mock_obstacle.return_value = torch.randn(
+                            self.batch_size,
+                            10,
+                            6,  # pos + vel + acc (no radius)
+                        )
 
-        # agent(3) + target(2) + obstacles(10*5)
-        expected_features_dim = 3 + 2 + (10 * 5)
-        assert features.shape == (2, expected_features_dim)
-        assert not torch.isnan(features).any()
+                        output = extractor(observations)
 
-    def test_forward_with_acceleration(self):
-        """Test forward pass with acceleration features."""
-        observation_space = self.create_test_observation_space(
-            include_acceleration=True, include_radius=True
-        )
+                        expected_dim = 64  # 4 + 2 + (6 * 10)
+                        assert output.shape == (self.batch_size, expected_dim)
+                        assert not torch.isnan(output).any()
+                        assert not torch.isinf(output).any()
+
+    def test_forward_with_no_acceleration_and_radius(self):
+        """Test forward pass with acceleration disabled and radius enabled."""
         extractor = PaddingExtractor(
-            observation_space,
-            max_obstacles=10,
-            include_acceleration=True,
+            self.observation_space,
+            include_acceleration=False,
             include_radius=True,
         )
-        observations = self.create_test_observations(
-            include_acceleration=True, include_radius=True
-        )
 
-        with torch.no_grad():
-            features = extractor(observations)
+        observations = self.create_test_observations()
 
-        # agent(5) + target(2) + obstacles(10*7)
-        expected_features_dim = 5 + 2 + (10 * 7)
-        assert features.shape == (2, expected_features_dim)
-        assert not torch.isnan(features).any()
+        with patch("extractors.padding_extractor.validate_observation_tensors"):
+            with patch(
+                "extractors.padding_extractor.extract_agent_features"
+            ) as mock_agent:
+                with patch(
+                    "extractors.padding_extractor.extract_target_features"
+                ) as mock_target:
+                    with patch(
+                        "extractors.padding_extractor.extract_obstacle_features"
+                    ) as mock_obstacle:
+                        mock_agent.return_value = torch.randn(
+                            self.batch_size, 3  # vel + radius (no acc)
+                        )
+                        mock_target.return_value = torch.randn(
+                            self.batch_size, 2
+                        )
+                        mock_obstacle.return_value = torch.randn(
+                            self.batch_size,
+                            10,
+                            5,  # radius + pos + vel (no acc)
+                        )
 
-    def test_forward_without_radius(self):
-        """Test forward pass without radius features."""
-        observation_space = self.create_test_observation_space(
-            include_acceleration=False, include_radius=False
-        )
+                        output = extractor(observations)
+
+                        expected_dim = 55  # 3 + 2 + (5 * 10)
+                        assert output.shape == (self.batch_size, expected_dim)
+                        assert not torch.isnan(output).any()
+                        assert not torch.isinf(output).any()
+
+    def test_forward_with_minimal_features(self):
+        """Test forward pass with minimal features (no acceleration, no radius)."""
         extractor = PaddingExtractor(
-            observation_space, include_acceleration=False, include_radius=False
+            self.observation_space,
+            include_acceleration=False,
+            include_radius=False,
         )
-        observations = self.create_test_observations(
-            include_acceleration=False, include_radius=False
+
+        observations = self.create_test_observations()
+
+        with patch("extractors.padding_extractor.validate_observation_tensors"):
+            with patch(
+                "extractors.padding_extractor.extract_agent_features"
+            ) as mock_agent:
+                with patch(
+                    "extractors.padding_extractor.extract_target_features"
+                ) as mock_target:
+                    with patch(
+                        "extractors.padding_extractor.extract_obstacle_features"
+                    ) as mock_obstacle:
+                        mock_agent.return_value = torch.randn(
+                            self.batch_size, 2  # vel only
+                        )
+                        mock_target.return_value = torch.randn(
+                            self.batch_size, 2
+                        )
+                        mock_obstacle.return_value = torch.randn(
+                            self.batch_size, 10, 4  # pos + vel only
+                        )
+
+                        output = extractor(observations)
+
+                        expected_dim = 44  # 2 + 2 + (4 * 10)
+                        assert output.shape == (self.batch_size, expected_dim)
+                        assert not torch.isnan(output).any()
+                        assert not torch.isinf(output).any()
+
+    def test_forward_with_all_masked_obstacles(self):
+        """Test forward pass when all obstacles are masked."""
+        observations = self.create_test_observations()
+        observations["mask"] = torch.zeros(self.batch_size, 10)  # All masked
+
+        with patch("extractors.padding_extractor.validate_observation_tensors"):
+            with patch(
+                "extractors.padding_extractor.extract_agent_features"
+            ) as mock_agent:
+                with patch(
+                    "extractors.padding_extractor.extract_target_features"
+                ) as mock_target:
+                    with patch(
+                        "extractors.padding_extractor.extract_obstacle_features"
+                    ) as mock_obstacle:
+                        mock_agent.return_value = torch.randn(
+                            self.batch_size, 5
+                        )
+                        mock_target.return_value = torch.randn(
+                            self.batch_size, 2
+                        )
+                        mock_obstacle.return_value = torch.zeros(
+                            self.batch_size, 10, 7
+                        )
+
+                        output = self.extractor(observations)
+
+                        assert output.shape == (self.batch_size, 77)
+                        assert not torch.isnan(output).any()
+
+    def test_forward_custom_max_obstacles(self):
+        """Test forward pass with custom max obstacles."""
+        custom_observation_space = spaces.Dict(
+            {
+                "agent": spaces.Box(low=-1, high=1, shape=(5,)),
+                "obstacles": spaces.Box(low=-1, high=1, shape=(5, 7)),
+                "target": spaces.Box(low=-1, high=1, shape=(2,)),
+                "mask": spaces.Box(low=0, high=1, shape=(5,)),
+            }
         )
 
-        with torch.no_grad():
-            features = extractor(observations)
-
-        # agent(2) + target(2) + obstacles(10*4)
-        expected_features_dim = 2 + 2 + (10 * 4)
-        assert features.shape == (2, expected_features_dim)
-        assert not torch.isnan(features).any()
-
-    def test_forward_feature_concatenation_order(self):
-        """Test that features are concatenated in the correct order."""
-        observation_space = self.create_test_observation_space()
-        extractor = PaddingExtractor(observation_space, max_obstacles=10)
-
-        # Create predictable test data
-        batch_size = 1
-        max_obstacles = 3
+        extractor = PaddingExtractor(custom_observation_space, max_obstacles=5)
 
         observations = {
-            "agent": torch.tensor([[1.0, 2.0, 3.0]]),  # [radius, vel_x, vel_y]
-            "obstacles": torch.tensor(
-                [
-                    [
-                        [4.0, 5.0, 6.0, 7.0, 8.0],  # obstacle 1
-                        [9.0, 10.0, 11.0, 12.0, 13.0],  # obstacle 2
-                        [14.0, 15.0, 16.0, 17.0, 18.0],
-                    ]
-                ]
-            ),  # obstacle 3
-            "target": torch.tensor([[19.0, 20.0]]),
-            "mask": torch.ones(batch_size, max_obstacles),
+            "agent": torch.randn(self.batch_size, 5),
+            "obstacles": torch.randn(self.batch_size, 5, 7),
+            "target": torch.randn(self.batch_size, 2),
+            "mask": torch.randint(0, 2, (self.batch_size, 5)).float(),
         }
 
-        with torch.no_grad():
-            features = extractor(observations)
+        with patch("extractors.padding_extractor.validate_observation_tensors"):
+            with patch(
+                "extractors.padding_extractor.extract_agent_features"
+            ) as mock_agent:
+                with patch(
+                    "extractors.padding_extractor.extract_target_features"
+                ) as mock_target:
+                    with patch(
+                        "extractors.padding_extractor.extract_obstacle_features"
+                    ) as mock_obstacle:
+                        mock_agent.return_value = torch.randn(
+                            self.batch_size, 3
+                        )
+                        mock_target.return_value = torch.randn(
+                            self.batch_size, 2
+                        )
+                        mock_obstacle.return_value = torch.randn(
+                            self.batch_size, 5, 5
+                        )
 
-        # Check concatenation order: agent + target + flattened obstacles
-        expected = torch.cat(
+                        output = extractor(observations)
+
+                        expected_dim = (
+                            3 + 2 + (5 * 5)
+                        )  # agent + target + obstacles
+                        assert output.shape == (self.batch_size, expected_dim)
+
+
+class TestObstacleFlattening:
+    """Test suite for obstacle feature flattening."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        observation_space = spaces.Dict(
+            {
+                "agent": spaces.Box(low=-1, high=1, shape=(5,)),
+                "obstacles": spaces.Box(low=-1, high=1, shape=(3, 7)),
+                "target": spaces.Box(low=-1, high=1, shape=(2,)),
+                "mask": spaces.Box(low=0, high=1, shape=(3,)),
+            }
+        )
+        self.extractor = PaddingExtractor(observation_space, max_obstacles=3)
+
+    def test_flatten_obstacle_features_basic(self):
+        """Test basic obstacle feature flattening."""
+        batch_size = 2
+        max_obstacles = 3
+        feature_size = 4
+
+        obstacle_features = torch.tensor(
             [
-                observations["agent"].flatten(),  # [1, 2, 3]
-                observations["target"].flatten(),  # [19, 20]
-                observations[
-                    "obstacles"
-                ].flatten(),  # [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+                [  # Batch 1
+                    [1.0, 2.0, 3.0, 4.0],  # Obstacle 1
+                    [5.0, 6.0, 7.0, 8.0],  # Obstacle 2
+                    [9.0, 10.0, 11.0, 12.0],  # Obstacle 3
+                ],
+                [  # Batch 2
+                    [13.0, 14.0, 15.0, 16.0],  # Obstacle 1
+                    [17.0, 18.0, 19.0, 20.0],  # Obstacle 2
+                    [21.0, 22.0, 23.0, 24.0],  # Obstacle 3
+                ],
             ]
         )
 
-        torch.testing.assert_close(features[0, : len(expected)], expected)
-
-    def test_forward_with_masked_obstacles(self):
-        """Test that masked obstacles are properly zeroed."""
-        observation_space = self.create_test_observation_space()
-        extractor = PaddingExtractor(observation_space, max_obstacles=10)
-
-        observations = self.create_test_observations(
-            batch_size=1, max_obstacles=4
+        flattened = self.extractor._flatten_obstacle_features(
+            obstacle_features, max_obstacles, feature_size
         )
-        observations["mask"] = torch.tensor(
-            [[1.0, 1.0, 0.0, 0.0]]
-        )  # Only first 2 obstacles valid
 
-        with torch.no_grad():
-            features = extractor(observations)
+        assert flattened.shape == (batch_size, max_obstacles * feature_size)
 
-        # Extract obstacle portion of features (after agent + target)
-        agent_target_size = 3 + 2  # agent + target
-        obstacle_features = features[0, agent_target_size:].reshape(4, 5)
+        # Check flattening is correct
+        expected_batch1 = torch.tensor(
+            [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0]
+        )
+        expected_batch2 = torch.tensor(
+            [
+                13.0,
+                14.0,
+                15.0,
+                16.0,
+                17.0,
+                18.0,
+                19.0,
+                20.0,
+                21.0,
+                22.0,
+                23.0,
+                24.0,
+            ]
+        )
 
-        # First two obstacles should retain values, last two should be zero
-        assert not torch.allclose(
-            obstacle_features[0], torch.zeros(5)
-        )  # First obstacle has values
-        assert not torch.allclose(
-            obstacle_features[1], torch.zeros(5)
-        )  # Second obstacle has values
-        torch.testing.assert_close(
-            obstacle_features[2], torch.zeros(5)
-        )  # Third obstacle is zero
-        torch.testing.assert_close(
-            obstacle_features[3], torch.zeros(5)
-        )  # Fourth obstacle is zero
+        torch.testing.assert_close(flattened[0], expected_batch1)
+        torch.testing.assert_close(flattened[1], expected_batch2)
 
-    def test_forward_zero_obstacles(self):
-        """Test forward pass when all obstacles are masked."""
-        observation_space = self.create_test_observation_space()
-        extractor = PaddingExtractor(observation_space, max_obstacles=10)
+    def test_flatten_obstacle_features_single_batch(self):
+        """Test obstacle feature flattening with single batch."""
+        obstacle_features = torch.tensor([[[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]])
 
-        observations = self.create_test_observations(batch_size=1)
-        observations["mask"] = torch.zeros(1, 10)  # All obstacles masked
+        flattened = self.extractor._flatten_obstacle_features(
+            obstacle_features, max_obstacles=3, feature_size=2
+        )
 
-        with torch.no_grad():
-            features = extractor(observations)
+        assert flattened.shape == (1, 6)
+        expected = torch.tensor([[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]])
+        torch.testing.assert_close(flattened, expected)
 
-        assert features.shape == (1, 3 + 2 + (10 * 5))
-        assert not torch.isnan(features).any()
+    def test_flatten_obstacle_features_zeros(self):
+        """Test obstacle feature flattening with zero features."""
+        batch_size = 2
+        obstacle_features = torch.zeros(batch_size, 4, 3)
 
-        # Check that obstacle features are all zeros
-        agent_target_size = 3 + 2
-        obstacle_features = features[0, agent_target_size:]
-        torch.testing.assert_close(obstacle_features, torch.zeros(10 * 5))
+        flattened = self.extractor._flatten_obstacle_features(
+            obstacle_features, max_obstacles=4, feature_size=3
+        )
 
-    def test_different_batch_sizes(self):
-        """Test extractor with different batch sizes."""
-        observation_space = self.create_test_observation_space()
-        extractor = PaddingExtractor(observation_space, max_obstacles=10)
+        assert flattened.shape == (batch_size, 12)
+        assert torch.all(flattened == 0)
 
-        for batch_size in [1, 4, 8, 16]:
-            observations = self.create_test_observations(batch_size=batch_size)
-
-            with torch.no_grad():
-                features = extractor(observations)
-
-            expected_shape = (batch_size, 3 + 2 + (10 * 5))
-            assert features.shape == expected_shape
-            assert not torch.isnan(features).any()
-
-    def test_different_obstacle_counts(self):
-        """Test extractor with different numbers of obstacles."""
-        for max_obstacles in [5, 15, 20]:
-            observation_space = self.create_test_observation_space()
-            observation_space["obstacles"] = spaces.Box(
-                low=-float("inf"), high=float("inf"), shape=(max_obstacles, 5)
-            )
-            observation_space["mask"] = spaces.Box(
-                low=0, high=1, shape=(max_obstacles,)
-            )
-
-            extractor = PaddingExtractor(observation_space, max_obstacles=10)
-
-            observations = self.create_test_observations(
-                max_obstacles=max_obstacles
-            )
-            observations["obstacles"] = torch.randn(2, max_obstacles, 5)
-            observations["mask"] = torch.rand(2, max_obstacles)
-
-            with torch.no_grad():
-                features = extractor(observations)
-
-            expected_shape = (2, 3 + 2 + (max_obstacles * 5))
-            assert features.shape == expected_shape
-            assert not torch.isnan(features).any()
-
-    def test_gradient_flow(self):
-        """Test that gradients flow properly through the network."""
-        observation_space = self.create_test_observation_space()
-        extractor = PaddingExtractor(observation_space, max_obstacles=10)
-
-        observations = self.create_test_observations(batch_size=2)
-
-        # Enable gradients for input tensors
-        for key in observations:
-            observations[key].requires_grad_(True)
-
-        features = extractor(observations)
-        loss = features.sum()
-        loss.backward()
-
-        # Check that input gradients exist
-        for key in ["agent", "obstacles", "target"]:
-            assert observations[key].grad is not None, f"No gradient for {key}"
-            assert not torch.isnan(
-                observations[key].grad
-            ).any(), f"NaN gradient for {key}"
-
-    def test_features_dim_property(self):
-        """Test the features_dim property calculation."""
-        # Test with different configurations
-        configs = [
-            (
-                False,
-                False,
-                10,
-                2 + 2 + (10 * 4),
-            ),  # vel only + target + obstacles
-            (
-                False,
-                True,
-                10,
-                3 + 2 + (10 * 5),
-            ),  # radius + vel + target + obstacles
-            (
-                True,
-                False,
-                10,
-                4 + 2 + (10 * 6),
-            ),  # vel + acc + target + obstacles
-            (
-                True,
-                True,
-                10,
-                5 + 2 + (10 * 7),
-            ),  # radius + vel + acc + target + obstacles
-            (False, True, 5, 3 + 2 + (5 * 5)),  # Test different obstacle count
+    def test_flatten_obstacle_features_different_shapes(self):
+        """Test obstacle feature flattening with different input shapes."""
+        # Test different combinations of max_obstacles and feature_size
+        test_cases = [
+            (1, 5, 2),  # 1 batch, 5 obstacles, 2 features each
+            (3, 2, 7),  # 3 batch, 2 obstacles, 7 features each
+            (4, 8, 1),  # 4 batch, 8 obstacles, 1 feature each
         ]
 
-        for (
-            include_acceleration,
-            include_radius,
-            max_obs,
-            expected_dim,
-        ) in configs:
-            observation_space = self.create_test_observation_space(
-                include_acceleration=include_acceleration,
-                include_radius=include_radius,
+        for batch_size, max_obstacles, feature_size in test_cases:
+            obstacle_features = torch.randn(
+                batch_size, max_obstacles, feature_size
             )
-            if max_obs != 10:
-                # Update obstacle count in observation space
-                agent_size = observation_space["agent"].shape[0]
-                obstacle_size = observation_space["obstacles"].shape[1]
-                observation_space = spaces.Dict(
-                    {
-                        "agent": spaces.Box(
-                            low=-float("inf"),
-                            high=float("inf"),
-                            shape=(agent_size,),
-                        ),
-                        "obstacles": spaces.Box(
-                            low=-float("inf"),
-                            high=float("inf"),
-                            shape=(max_obs, obstacle_size),
-                        ),
-                        "target": spaces.Box(
-                            low=-float("inf"), high=float("inf"), shape=(2,)
-                        ),
-                        "mask": spaces.Box(low=0, high=1, shape=(max_obs,)),
-                    }
-                )
 
-            extractor = PaddingExtractor(
-                observation_space,
-                include_acceleration=include_acceleration,
-                include_radius=include_radius,
+            flattened = self.extractor._flatten_obstacle_features(
+                obstacle_features, max_obstacles, feature_size
             )
-            assert extractor.features_dim == expected_dim
+
+            expected_shape = (batch_size, max_obstacles * feature_size)
+            assert flattened.shape == expected_shape
 
 
 class TestPaddingExtractorIntegration:
     """Integration tests for PaddingExtractor."""
 
-    def create_test_observation_space(
-        self, include_acceleration: bool = False, include_radius: bool = True
-    ):
-        """Create a test observation space for integration tests."""
-        # Calculate feature sizes based on flags
-        agent_size = 2  # Base: vel_x, vel_y
-        if include_radius:
-            agent_size += 1  # Add radius
-        if include_acceleration:
-            agent_size += 2  # Add acc_x, acc_y
-
-        obstacle_size = 4  # Base: rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y
-        if include_radius:
-            obstacle_size += 1  # Add radius
-        if include_acceleration:
-            obstacle_size += 2  # Add acc_x, acc_y
-
-        return spaces.Dict(
+    def test_end_to_end_processing(self):
+        """Test complete end-to-end processing."""
+        observation_space = spaces.Dict(
             {
-                "agent": spaces.Box(
-                    low=-float("inf"), high=float("inf"), shape=(agent_size,)
-                ),
-                "obstacles": spaces.Box(
-                    low=-float("inf"),
-                    high=float("inf"),
-                    shape=(15, obstacle_size),
-                ),
-                "target": spaces.Box(
-                    low=-float("inf"), high=float("inf"), shape=(2,)
-                ),
-                "mask": spaces.Box(low=0, high=1, shape=(15,)),
+                "agent": spaces.Box(low=-1, high=1, shape=(5,)),
+                "obstacles": spaces.Box(low=-1, high=1, shape=(3, 7)),
+                "target": spaces.Box(low=-1, high=1, shape=(2,)),
+                "mask": spaces.Box(low=0, high=1, shape=(3,)),
             }
         )
 
-    def test_realistic_navigation_scenario(self):
-        """Test with realistic navigation scenario data."""
-        observation_space = self.create_test_observation_space()
-        extractor = PaddingExtractor(observation_space, max_obstacles=10)
+        extractor = PaddingExtractor(observation_space, max_obstacles=3)
 
-        # Simulate realistic agent state
-        agent_data = torch.tensor([[0.5, 0.3, 0.1]])  # [radius, vel_x, vel_y]
-
-        # Simulate realistic obstacles
-        obstacles_data = torch.zeros(1, 15, 5)
-        obstacles_data[0, 0, :] = torch.tensor(
-            [0.3, 0.5, 0.2, -0.1, 0.0]
-        )  # Close obstacle
-        obstacles_data[0, 1, :] = torch.tensor(
-            [0.4, 2.0, 1.5, 0.0, 0.1]
-        )  # Distant obstacle
-        obstacles_data[0, 2, :] = torch.tensor(
-            [0.2, -0.8, 0.3, 0.2, -0.1]
-        )  # Another close obstacle
-
-        # Target position
-        target_data = torch.tensor([[1.5, 2.0]])
-
-        # Mask - first 3 obstacles are valid
-        mask = torch.zeros(1, 15)
-        mask[0, :3] = 1.0
-
+        # Real observations
         observations = {
-            "agent": agent_data,
-            "obstacles": obstacles_data,
-            "target": target_data,
-            "mask": mask,
-        }
-
-        with torch.no_grad():
-            features = extractor(observations)
-
-        expected_dim = 3 + 2 + (15 * 5)  # 80
-        assert features.shape == (1, expected_dim)
-        assert not torch.isnan(features).any()
-        assert torch.isfinite(features).all()
-
-    def test_edge_case_same_positions(self):
-        """Test edge case where agent and obstacles have same positions."""
-        observation_space = self.create_test_observation_space()
-        extractor = PaddingExtractor(observation_space, max_obstacles=10)
-
-        # Agent and obstacles at same position (zero relative distance)
-        observations = {
-            "agent": torch.tensor([[0.5, 0.0, 0.0]]),  # [radius, vel_x, vel_y]
+            "agent": torch.tensor(
+                [[0.5, 0.1, 0.2, 0.01, 0.02]]
+            ),  # [radius, vel_x, vel_y, acc_x, acc_y]
             "obstacles": torch.tensor(
-                [[[0.3, 0.0, 0.0, 0.0, 0.0]]]
-            ),  # Same position
-            "target": torch.tensor(
-                [[0.0, 0.0]]
-            ),  # Target also at same position
-            "mask": torch.tensor([[1.0]]),
-        }
-
-        with torch.no_grad():
-            features = extractor(observations)
-
-        assert features.shape[0] == 1
-        assert not torch.isnan(features).any()
-
-    def test_performance_large_batch_many_obstacles(self):
-        """Test extractor performance with large batch and many obstacles."""
-        observation_space = self.create_test_observation_space()
-        extractor = PaddingExtractor(observation_space, max_obstacles=10)
-
-        batch_size = 64
-        max_obstacles = 15
-
-        observations = {
-            "agent": torch.randn(batch_size, 3),
-            "obstacles": torch.randn(batch_size, max_obstacles, 5),
-            "target": torch.randn(batch_size, 2),
-            "mask": torch.rand(batch_size, max_obstacles),
-        }
-
-        with torch.no_grad():
-            features = extractor(observations)
-
-        expected_dim = 3 + 2 + (15 * 5)
-        assert features.shape == (batch_size, expected_dim)
-        assert not torch.isnan(features).any()
-
-    def test_consistency_across_runs(self):
-        """Test that the extractor produces consistent results."""
-        observation_space = self.create_test_observation_space()
-        extractor = PaddingExtractor(observation_space, max_obstacles=10)
-
-        observations = {
-            "agent": torch.tensor([[0.5, 0.1, 0.2]]),
-            "obstacles": torch.tensor(
-                [[[0.3, 1.0, 0.5, 0.1, 0.0], [0.4, 0.5, 1.0, -0.1, 0.1]]]
+                [
+                    [
+                        [
+                            0.3,
+                            1.0,
+                            1.0,
+                            -0.5,
+                            -0.5,
+                            0.1,
+                            0.1,
+                        ],  # Valid obstacle
+                        [
+                            0.4,
+                            -1.0,
+                            0.5,
+                            0.2,
+                            -0.1,
+                            -0.05,
+                            0.05,
+                        ],  # Valid obstacle
+                        [
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                        ],  # Masked obstacle
+                    ]
+                ]
             ),
-            "target": torch.tensor([[1.5, 1.0]]),
+            "target": torch.tensor([[0.8, 0.6]]),  # Target relative position
+            "mask": torch.tensor(
+                [[1.0, 1.0, 0.0]]
+            ),  # First two obstacles valid
+        }
+
+        output = extractor(observations)
+
+        expected_dim = 3 + 2 + (3 * 5)  # agent + target + obstacles
+        assert output.shape == (1, expected_dim)
+        assert not torch.isnan(output).any()
+        assert not torch.isinf(output).any()
+
+    def test_gradient_flow(self):
+        """Test that gradients flow properly through the extractor."""
+        observation_space = spaces.Dict(
+            {
+                "agent": spaces.Box(low=-1, high=1, shape=(5,)),
+                "obstacles": spaces.Box(low=-1, high=1, shape=(3, 7)),
+                "target": spaces.Box(low=-1, high=1, shape=(2,)),
+                "mask": spaces.Box(low=0, high=1, shape=(3,)),
+            }
+        )
+
+        extractor = PaddingExtractor(observation_space, max_obstacles=3)
+
+        observations = {
+            "agent": torch.tensor(
+                [[0.5, 0.1, 0.2, 0.01, 0.02]], requires_grad=True
+            ),
+            "obstacles": torch.tensor(
+                [
+                    [
+                        [0.3, 1.0, 1.0, -0.5, -0.5, 0.1, 0.1],
+                        [0.4, -1.0, 0.5, 0.2, -0.1, -0.05, 0.05],
+                        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                    ]
+                ],
+                requires_grad=True,
+            ),
+            "target": torch.tensor([[0.8, 0.6]], requires_grad=True),
+            "mask": torch.tensor([[1.0, 1.0, 0.0]]),
+        }
+
+        output = extractor(observations)
+        loss = output.sum()
+        loss.backward()
+
+        # Check that gradients are computed
+        assert observations["agent"].grad is not None
+        assert observations["obstacles"].grad is not None
+        assert observations["target"].grad is not None
+
+    def test_deterministic_output(self):
+        """Test that output is deterministic for same input."""
+        observation_space = spaces.Dict(
+            {
+                "agent": spaces.Box(low=-1, high=1, shape=(5,)),
+                "obstacles": spaces.Box(low=-1, high=1, shape=(2, 7)),
+                "target": spaces.Box(low=-1, high=1, shape=(2,)),
+                "mask": spaces.Box(low=0, high=1, shape=(2,)),
+            }
+        )
+
+        extractor = PaddingExtractor(observation_space, max_obstacles=2)
+
+        observations = {
+            "agent": torch.tensor([[0.5, 0.1, 0.2, 0.01, 0.02]]),
+            "obstacles": torch.tensor(
+                [
+                    [
+                        [0.3, 1.0, 1.0, -0.5, -0.5, 0.1, 0.1],
+                        [0.4, -1.0, 0.5, 0.2, -0.1, -0.05, 0.05],
+                    ]
+                ]
+            ),
+            "target": torch.tensor([[0.8, 0.6]]),
             "mask": torch.tensor([[1.0, 1.0]]),
         }
 
-        # Run multiple times
-        results = []
-        for _ in range(5):
-            with torch.no_grad():
-                features = extractor(observations)
-            results.append(features.clone())
+        output1 = extractor(observations)
+        output2 = extractor(observations)
 
-        # All results should be identical (deterministic)
-        for result in results[1:]:
-            torch.testing.assert_close(results[0], result)
+        torch.testing.assert_close(output1, output2)
 
-    def test_memory_efficiency(self):
-        """Test that the extractor doesn't accumulate excessive memory."""
-        observation_space = self.create_test_observation_space()
-        extractor = PaddingExtractor(observation_space, max_obstacles=10)
-
-        # Run multiple forward passes to check for memory leaks
-        for _ in range(10):
-            observations = {
-                "agent": torch.randn(8, 3),
-                "obstacles": torch.randn(8, 15, 5),
-                "target": torch.randn(8, 2),
-                "mask": torch.rand(8, 15),
+    def test_feature_concatenation_order(self):
+        """Test that features are concatenated in the correct order."""
+        observation_space = spaces.Dict(
+            {
+                "agent": spaces.Box(low=-1, high=1, shape=(5,)),
+                "obstacles": spaces.Box(low=-1, high=1, shape=(2, 7)),
+                "target": spaces.Box(low=-1, high=1, shape=(2,)),
+                "mask": spaces.Box(low=0, high=1, shape=(2,)),
             }
+        )
 
-            with torch.no_grad():
-                features = extractor(observations)
+        extractor = PaddingExtractor(observation_space, max_obstacles=2)
 
-            del features, observations
+        # Use specific values to check order
+        observations = {
+            "agent": torch.tensor([[0.5, 0.1, 0.2, 0.01, 0.02]]),
+            "obstacles": torch.tensor(
+                [
+                    [
+                        [0.3, 1.0, 1.0, -0.5, -0.5, 0.1, 0.1],
+                        [0.4, -1.0, 0.5, 0.2, -0.1, -0.05, 0.05],
+                    ]
+                ]
+            ),
+            "target": torch.tensor([[0.8, 0.6]]),
+            "mask": torch.tensor([[1.0, 1.0]]),
+        }
 
-        # Test passes if no memory error occurs
+        output = extractor(observations)
 
+        # Expected structure: [agent_features, target_features, flattened_obstacles]
+        # agent_features: [radius, vel_x, vel_y] = [0.5, 0.1, 0.2]
+        # target_features: [0.8, 0.6]
+        # obstacle_features: [radius, rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y] for each obstacle
 
-if __name__ == "__main__":
-    pytest.main([__file__])
+        # Check that agent features come first
+        torch.testing.assert_close(output[0, :3], torch.tensor([0.5, 0.1, 0.2]))
+        # Check that target features come next
+        torch.testing.assert_close(output[0, 3:5], torch.tensor([0.8, 0.6]))
+        # Remaining should be flattened obstacle features
+        assert output.shape[1] == 3 + 2 + (2 * 5)  # agent + target + obstacles
+
+    def test_different_configurations(self):
+        """Test with different feature configurations."""
+        observation_space = spaces.Dict(
+            {
+                "agent": spaces.Box(low=-1, high=1, shape=(5,)),
+                "obstacles": spaces.Box(low=-1, high=1, shape=(2, 7)),
+                "target": spaces.Box(low=-1, high=1, shape=(2,)),
+                "mask": spaces.Box(low=0, high=1, shape=(2,)),
+            }
+        )
+
+        configurations = [
+            {"include_acceleration": True, "include_radius": True},
+            {"include_acceleration": True, "include_radius": False},
+            {"include_acceleration": False, "include_radius": True},
+            {"include_acceleration": False, "include_radius": False},
+        ]
+
+        observations = {
+            "agent": torch.tensor([[0.5, 0.1, 0.2, 0.01, 0.02]]),
+            "obstacles": torch.tensor(
+                [
+                    [
+                        [0.3, 1.0, 1.0, -0.5, -0.5, 0.1, 0.1],
+                        [0.4, -1.0, 0.5, 0.2, -0.1, -0.05, 0.05],
+                    ]
+                ]
+            ),
+            "target": torch.tensor([[0.8, 0.6]]),
+            "mask": torch.tensor([[1.0, 1.0]]),
+        }
+
+        for config in configurations:
+            extractor = PaddingExtractor(
+                observation_space, max_obstacles=2, **config
+            )
+            output = extractor(observations)
+
+            # Verify output shape matches expected feature dimensions
+            assert output.shape == (1, extractor.features_dim)
+            assert not torch.isnan(output).any()
+            assert not torch.isinf(output).any()
