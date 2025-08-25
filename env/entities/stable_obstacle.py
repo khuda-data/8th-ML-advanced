@@ -12,7 +12,7 @@ class StableObstacle(Entity):
         self,
         radius: float = 0.5,
         mass: float = 1.0,
-        speed: float = 2.0,
+        speed: float = 1.0,
     ):
         self.speed = speed
 
