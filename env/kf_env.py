@@ -442,7 +442,6 @@ class KFEnv(gym.Env):
         w = RewardType.TARGET_REACHED
         r = self.destruction_radius
         # reward = ( -w / r ) * x + w
-        distance_reward = (w / r**2) * (current_dist - r)**2 
         # 거리 보상
         # reward = ( 2 * w / r**3 ) * x**3 - ( 3*w / r**2 ) * x**2 + w
 
@@ -450,14 +449,19 @@ class KFEnv(gym.Env):
         # 1. 방향성 조건: 가까워지는 움직임일 때만 거리 보상을 부여합니다.
         # progress가 0보다 크면 (가까워졌으면) distance_reward를 그대로 사용하고,
         # 그렇지 않으면 (멀어졌거나 그대로면) 보상을 0으로 만듭니다.
+        reward = -RewardType.MOVE_BACK_PENALTY
+
         if progress > 0:
-            final_reward = distance_reward
-        else:
-            final_reward = 0.0
+            distance_reward = (w / r**2) * (current_dist - r)**2 
+            time_multiplier = max(0.0, (-1.0 / 5000.0) * self.elapsed_steps + 1.0)
+            # stagnation_penalty = -RewardType.STAGNATION_PENALTY_MAX * math.exp(-RewardType.STAGNATION_PENALTY_DECAY * move_distance)
 
-        stagnation_penalty = -RewardType.STAGNATION_PENALTY_MAX * math.exp(-RewardType.STAGNATION_PENALTY_DECAY * move_distance)
+            # print("time_multiplier", time_multiplier)
+            reward = distance_reward * time_multiplier**3
 
-        reward = final_reward + stagnation_penalty
+        # print("move_distance:", move_distance)
+        if move_distance < RewardType.MOVE_DISTANCE_MAX:
+            reward -= RewardType.STAGNATION_PENALTY
 
         # if self._check_target_reached():
         #     reward += RewardType.TARGET_REACHED
@@ -466,9 +470,6 @@ class KFEnv(gym.Env):
             reward -= RewardType.COLLISION_OCCURRED * self._get_time_penalty()
         elif self._is_out_destruction_(self.target_position):
             reward -= RewardType.TARGET_DESTROYED * self._get_time_penalty()
-
-        if self._check_target_reached():
-            reward -= self._get_time_penalty()
 
         # print(RewardType.STAGNATION_PENALTY_MAX * math.exp(-RewardType.STAGNATION_PENALTY_DECAY * move_distance))
 
