@@ -66,7 +66,7 @@ class AttentionExtractor(BaseFeaturesExtractor):
             [
                 nn.Sequential(
                     nn.Linear(d_model, d_model * 2),
-                    nn.ReLU(),
+                    nn.LeakyReLU(),
                     nn.Linear(d_model * 2, d_model),
                 )
                 for _ in range(num_layers)

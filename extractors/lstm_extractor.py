@@ -52,13 +52,13 @@ class LSTMExtractor(BaseFeaturesExtractor):
             self._post = nn.Sequential(
                 nn.Linear(total_input_dim, features_dim * 2),
                 nn.LayerNorm(features_dim * 2),
-                nn.ReLU(),
+                nn.LeakyReLU(),
                 nn.Linear(features_dim * 2, features_dim),
             )
         else:
             self._post = nn.Sequential(
                 nn.Linear(total_input_dim, features_dim * 2),
-                nn.ReLU(),
+                nn.LeakyReLU(),
                 nn.Linear(features_dim * 2, features_dim),
             )
 

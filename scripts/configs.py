@@ -50,7 +50,7 @@ class NetworkConfig:
     """Neural network architecture configuration."""
 
     net_arch: List[int] = None
-    activation_fn = nn.ReLU
+    activation_fn = nn.LeakyReLU
 
     def __post_init__(self):
         if self.net_arch is None:
@@ -238,7 +238,7 @@ def get_standard_config() -> FullConfig:
             n_heads=4,
             n_layers=2,
             dropout=0.1,
-            include_acceleration=True,
+            include_acceleration=False,
         ),
         sac=SACConfig(
             learning_rate=3e-4,
