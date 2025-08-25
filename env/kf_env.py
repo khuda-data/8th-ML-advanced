@@ -4,6 +4,7 @@ import pygame
 from pygame import Vector2
 import pymunk
 import numpy as np
+import math
 from typing import List, Optional, Tuple, Dict, Any, Type
 
 from .types import CollisionType, RewardType
@@ -30,6 +31,7 @@ class KFEnv(gym.Env):
         self.target_radius = target_radius
         self.recognition_radius = recognition_radius
         self.destruction_radius = destruction_radius
+        self.pre_distance_to_target = destruction_radius
 
         self.action_space = spaces.Box(
             low=-1.0, high=1.0, shape=(2,), dtype=np.float32
@@ -159,6 +161,7 @@ class KFEnv(gym.Env):
         super().reset(seed=seed)
 
         self.collision_occurred = False
+        self.pre_distance_to_target = self.destruction_radius
         self.elapsed_steps = 0
 
         if self.agent is None:
@@ -206,6 +209,8 @@ class KFEnv(gym.Env):
             self._is_out_destruction_(self.target_position)
             or self.elapsed_steps > 5000
         )
+
+        self.pre_distance_to_target = self._get_distance_to_target()
 
         return observation, reward, terminated, truncated, {}
 
@@ -288,6 +293,9 @@ class KFEnv(gym.Env):
             rgb_array = np.transpose(rgb_array, (1, 0, 2))
             return rgb_array
 
+    def _get_distance_to_target(self) -> float:
+        return self.target_position.distance_to(self.agent.get_position())
+
     def _get_random_position(
         self, area_radius: float, center: Vector2 = Vector2(0, 0)
     ) -> Vector2:
@@ -339,24 +347,48 @@ class KFEnv(gym.Env):
     def _calculate_reward(self) -> float:
         if not self.agent:
             return 0.0
+        
+        current_dist = self._get_distance_to_target()
+        progress = self.pre_distance_to_target - current_dist
+        move_distance = abs(progress)
 
-        agent_pos = self.agent.get_position()
-        distance_to_target = agent_pos.distance_to(self.target_position)
-        reward = ( -RewardType.TARGET_REACHED / (self.destruction_radius*2) ) * distance_to_target + RewardType.TARGET_REACHED 
+        w = RewardType.TARGET_REACHED
+        r = self.destruction_radius
+        # reward = ( -w / r ) * x + w
+        distance_reward = (w / r**2) * (current_dist - r)**2 
+        # 거리 보상
+        # reward = ( 2 * w / r**3 ) * x**3 - ( 3*w / r**2 ) * x**2 + w
+
+        # --- 요구사항 적용 시작 ---
+        # 1. 방향성 조건: 가까워지는 움직임일 때만 거리 보상을 부여합니다.
+        # progress가 0보다 크면 (가까워졌으면) distance_reward를 그대로 사용하고,
+        # 그렇지 않으면 (멀어졌거나 그대로면) 보상을 0으로 만듭니다.
+        if progress > 0:
+            final_reward = distance_reward
+        else:
+            final_reward = 0.0
+
+        stagnation_penalty = -RewardType.STAGNATION_PENALTY_MAX * math.exp(-RewardType.STAGNATION_PENALTY_DECAY * move_distance)
+
+        reward = final_reward + stagnation_penalty
+
+        # if self._check_target_reached():
+        #     reward += RewardType.TARGET_REACHED
+        # el
+        if self.collision_occurred:
+            reward -= RewardType.COLLISION_OCCURRED * self._get_time_penalty()
+        elif self._is_out_destruction_(self.target_position):
+            reward -= RewardType.TARGET_DESTROYED * self._get_time_penalty()
 
         if self._check_target_reached():
-            reward += RewardType.TARGET_REACHED
-        elif self.collision_occurred:
-            reward -= RewardType.COLLISION_OCCURRED
-        elif self._is_out_destruction_(self.target_position):
-            reward -= RewardType.TARGET_DESTROYED
+            reward -= self._get_time_penalty()
 
-        reward -= self._get_time_penalty()
+        # print(RewardType.STAGNATION_PENALTY_MAX * math.exp(-RewardType.STAGNATION_PENALTY_DECAY * move_distance))
+
         return reward
 
     def _get_time_penalty(self) -> float:
-        dt = 1.0 / self.metadata["render_fps"]
-        return RewardType.TIME_ALPHA * self.elapsed_steps * dt
+        return RewardType.TIME_ALPHA * self.elapsed_steps
 
     def _check_target_reached(self) -> bool:
         if not self.agent:
