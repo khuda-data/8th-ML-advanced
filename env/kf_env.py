@@ -21,6 +21,8 @@ class KFEnv(gym.Env):
         target_radius: float = 1.0,
         recognition_radius: float = 7.0,
         destruction_radius: float = 15.0,
+        max_velocity: float = 10.0,
+        max_acceleration: float = 5.0,
     ) -> None:
         super().__init__()
 
@@ -33,6 +35,10 @@ class KFEnv(gym.Env):
         self.destruction_radius = destruction_radius
         self.pre_distance_to_target = destruction_radius
 
+        self.max_velocity = max_velocity
+        self.max_acceleration = max_acceleration
+        self.position_scale = recognition_radius
+
         self.action_space = spaces.Box(
             low=-1.0, high=1.0, shape=(2,), dtype=np.float32
         )
@@ -40,16 +46,25 @@ class KFEnv(gym.Env):
         self.observation_space = spaces.Dict(
             {
                 "agent": spaces.Box(
-                    low=-np.inf, high=np.inf, shape=(7,), dtype=np.float32
+                    low=-np.inf,
+                    high=np.inf,
+                    shape=(5,),
+                    dtype=np.float32,  # radius, vel_x, vel_y, acc_x, acc_y
                 ),
                 "obstacles": spaces.Box(
                     low=-np.inf,
                     high=np.inf,
-                    shape=(self.max_obstacles, 7),
+                    shape=(
+                        self.max_obstacles,
+                        7,
+                    ),  # radius, rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y, acc_x, acc_y
                     dtype=np.float32,
                 ),
                 "target": spaces.Box(
-                    low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32
+                    low=-np.inf,
+                    high=np.inf,
+                    shape=(2,),
+                    dtype=np.float32,  # rel_pos_x, rel_pos_y
                 ),
                 "mask": spaces.Box(
                     low=0, high=1, shape=(self.max_obstacles,), dtype=np.float32
@@ -306,14 +321,21 @@ class KFEnv(gym.Env):
         return Vector2(x, y)
 
     def _get_obs_dict(self) -> Dict[str, np.ndarray]:
+        # Agent observation: radius, vel_x, vel_y, acc_x, acc_y (scaled)
         agent_obs = (
-            self._encode_entity(self.agent)
+            self._encode_agent(self.agent)
             if self.agent
-            else np.zeros(7, dtype=np.float32)
+            else np.zeros(5, dtype=np.float32)
         )
-        target_obs = np.array(
-            [self.target_position.x, self.target_position.y], dtype=np.float32
+
+        # Target observation: rel_pos_x, rel_pos_y (scaled)
+        target_obs = (
+            self._encode_target_relative(self.agent, self.target_position)
+            if self.agent
+            else np.zeros(2, dtype=np.float32)
         )
+
+        # Obstacles observation: radius, rel_pos_x, rel_pos_y, rel_vel_x, rel_vel_y, acc_x, acc_y (scaled)
         obstacles_obs = np.zeros((self.max_obstacles, 7), dtype=np.float32)
         mask = np.zeros(self.max_obstacles, dtype=np.float32)
 
@@ -324,7 +346,9 @@ class KFEnv(gym.Env):
                     break
 
                 if self._is_in_recognition_(obstacle.get_position()):
-                    obstacles_obs[obs_idx] = self._encode_entity(obstacle)
+                    obstacles_obs[obs_idx] = self._encode_obstacle_relative(
+                        self.agent, obstacle
+                    )
                     mask[obs_idx] = 1.0
                     obs_idx += 1
 
@@ -335,12 +359,75 @@ class KFEnv(gym.Env):
             "mask": mask,
         }
 
-    def _encode_entity(self, entity: Entity) -> np.ndarray:
-        pos = entity.get_position()
-        vel = entity.get_velocity()
-        acc = entity.get_acceleration()
+    def _encode_agent(self, agent: Agent) -> np.ndarray:
+        vel = agent.get_velocity()
+        acc = agent.get_acceleration()
+
+        vel_scaled = Vector2(
+            vel.x / self.max_velocity, vel.y / self.max_velocity
+        )
+        acc_scaled = Vector2(
+            acc.x / self.max_acceleration, acc.y / self.max_acceleration
+        )
+
         return np.array(
-            [entity.radius, pos.x, pos.y, vel.x, vel.y, acc.x, acc.y],
+            [
+                agent.radius,
+                vel_scaled.x,
+                vel_scaled.y,
+                acc_scaled.x,
+                acc_scaled.y,
+            ],
+            dtype=np.float32,
+        )
+
+    def _encode_target_relative(
+        self, agent: Agent, target_pos: Vector2
+    ) -> np.ndarray:
+        agent_pos = agent.get_position()
+        rel_pos = target_pos - agent_pos
+
+        rel_pos_scaled = Vector2(
+            rel_pos.x / self.position_scale, rel_pos.y / self.position_scale
+        )
+
+        return np.array([rel_pos_scaled.x, rel_pos_scaled.y], dtype=np.float32)
+
+    def _encode_obstacle_relative(
+        self, agent: Agent, obstacle: Entity
+    ) -> np.ndarray:
+        agent_pos = agent.get_position()
+        agent_vel = agent.get_velocity()
+
+        obs_pos = obstacle.get_position()
+        obs_vel = obstacle.get_velocity()
+        obs_acc = obstacle.get_acceleration()
+
+        rel_pos = obs_pos - agent_pos
+        rel_vel = obs_vel - agent_vel
+
+        rel_pos_scaled = Vector2(
+            rel_pos.x / self.position_scale, rel_pos.y / self.position_scale
+        )
+
+        rel_vel_scaled = Vector2(
+            rel_vel.x / self.max_velocity, rel_vel.y / self.max_velocity
+        )
+
+        acc_scaled = Vector2(
+            obs_acc.x / self.max_acceleration, obs_acc.y / self.max_acceleration
+        )
+
+        return np.array(
+            [
+                obstacle.radius,
+                rel_pos_scaled.x,
+                rel_pos_scaled.y,
+                rel_vel_scaled.x,
+                rel_vel_scaled.y,
+                acc_scaled.x,
+                acc_scaled.y,
+            ],
             dtype=np.float32,
         )
 

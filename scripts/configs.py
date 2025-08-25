@@ -19,16 +19,32 @@ class EnvironmentConfig:
     n_obstacles: int = 20
     render_mode: Optional[str] = None  # None, "human", "rgb_array"
 
+    max_velocity: float = 10.0
+    max_acceleration: float = 5.0
+
 
 @dataclass
 class FeatureExtractorConfig:
-    """Feature extractor (attention mechanism) configuration."""
+    """Feature extractor configuration."""
 
+    extractor_type: str = "attention"  # "attention", "lstm", "padding"
+
+    # Common parameters for all extractors
+    include_acceleration: bool = True
+    include_radius: bool = True
+
+    # Attention-specific parameters
     d_model: int = 64
     n_heads: int = 4
     n_layers: int = 2
     dropout: float = 0.1
-    include_acceleration: bool = True
+
+    # LSTM-specific parameters
+    lstm_hidden: int = 128
+    lstm_layers: int = 1
+    bidirectional: bool = False
+    use_layernorm: bool = True
+    features_dim: int = 64
 
 
 @dataclass
@@ -50,7 +66,7 @@ class NetworkConfig:
     """Neural network architecture configuration."""
 
     net_arch: List[int] = None
-    activation_fn = nn.ReLU
+    activation_fn = nn.LeakyReLU
 
     def __post_init__(self):
         if self.net_arch is None:
@@ -208,10 +224,6 @@ class FullConfig:
     training_video: TrainingVideoConfig
     eval_video: EvalVideoConfig
     device: DeviceConfig
-    eval: EvalConfig
-    checkpoint: CheckPointConfig
-    logging: LoggingConfig
-    device: DeviceConfig
 
 
 # =============================================================================
@@ -219,7 +231,7 @@ class FullConfig:
 # =============================================================================
 
 
-def get_standard_config() -> FullConfig:
+def get_attention_config() -> FullConfig:
     """
     Standard configuration for normal training.
     Balanced performance and training time.
@@ -234,11 +246,13 @@ def get_standard_config() -> FullConfig:
             render_mode="rgb_array",
         ),
         feature_extractor=FeatureExtractorConfig(
+            extractor_type="attention",
             d_model=32,
             n_heads=4,
             n_layers=2,
             dropout=0.1,
-            include_acceleration=True,
+            include_acceleration=False,
+            include_radius=True,
         ),
         sac=SACConfig(
             learning_rate=3e-4,
@@ -256,22 +270,22 @@ def get_standard_config() -> FullConfig:
             eval_freq=1_000,
             eval_episodes=4,
             n_eval_envs=4,
-            eval_dir="standard/evals",
+            eval_dir="attention/evals",
         ),
         checkpoint=CheckPointConfig(
             save_freq=10_000,
             max_checkpoints=5,
-            checkpoint_dir="standard/cps",
+            checkpoint_dir="attention/cps",
         ),
         logging=LoggingConfig(
-            logs_dir="standard/logs",
+            logs_dir="attention/logs",
         ),
         training_video=TrainingVideoConfig(
-            videos_dir="standard/videos",
+            videos_dir="attention/videos",
             record_training=False,
         ),
         eval_video=EvalVideoConfig(
-            videos_dir="standard/videos",
+            videos_dir="attention/videos",
             record_eval=True,
             record_best=True,
             video_freq=1_000,
@@ -281,8 +295,135 @@ def get_standard_config() -> FullConfig:
     )
 
 
+def get_lstm_config() -> FullConfig:
+    """
+    LSTM-based feature extractor configuration.
+    Uses LSTM for sequential pattern recognition with radius features.
+    """
+    return FullConfig(
+        environment=EnvironmentConfig(
+            max_obstacles=15,
+            target_radius=1.5,
+            recognition_radius=8,
+            destruction_radius=15,
+            n_obstacles=15,
+            render_mode="rgb_array",
+        ),
+        feature_extractor=FeatureExtractorConfig(
+            extractor_type="lstm",
+            include_acceleration=True,
+            include_radius=True,
+            lstm_hidden=128,
+            lstm_layers=2,
+            bidirectional=True,
+            use_layernorm=True,
+            features_dim=64,
+        ),
+        sac=SACConfig(
+            learning_rate=3e-4,
+            buffer_size=1_000_000,
+            batch_size=256,
+            learning_starts=5_000,
+        ),
+        network=NetworkConfig(net_arch=[256, 128, 64]),
+        training=TrainingConfig(
+            total_timesteps=2_000_000,
+            log_interval=500,
+            n_envs=4,
+        ),
+        eval=EvalConfig(
+            eval_freq=5_000,
+            eval_episodes=10,
+            n_eval_envs=2,
+            eval_dir="lstm/evals",
+        ),
+        checkpoint=CheckPointConfig(
+            save_freq=25_000,
+            max_checkpoints=3,
+            checkpoint_dir="lstm/cps",
+        ),
+        logging=LoggingConfig(
+            logs_dir="lstm/logs",
+        ),
+        training_video=TrainingVideoConfig(
+            videos_dir="lstm/videos",
+            record_training=False,
+        ),
+        eval_video=EvalVideoConfig(
+            videos_dir="lstm/videos",
+            record_eval=True,
+            record_best=True,
+            video_freq=5_000,
+            video_length=500,
+        ),
+        device=DeviceConfig(device="auto"),
+    )
+
+
+def get_padding_config() -> FullConfig:
+    """
+    Padding-based feature extractor configuration.
+    Simple concatenation approach with radius and acceleration features.
+    """
+    return FullConfig(
+        environment=EnvironmentConfig(
+            max_obstacles=8,
+            target_radius=0.8,
+            recognition_radius=6,
+            destruction_radius=12,
+            n_obstacles=8,
+            render_mode="rgb_array",
+        ),
+        feature_extractor=FeatureExtractorConfig(
+            extractor_type="padding",
+            include_acceleration=True,
+            include_radius=True,
+        ),
+        sac=SACConfig(
+            learning_rate=1e-3,
+            buffer_size=500_000,
+            batch_size=64,
+            learning_starts=1_000,
+        ),
+        network=NetworkConfig(net_arch=[128, 64, 32]),
+        training=TrainingConfig(
+            total_timesteps=500_000,
+            log_interval=200,
+            n_envs=6,
+        ),
+        eval=EvalConfig(
+            eval_freq=2_000,
+            eval_episodes=5,
+            n_eval_envs=2,
+            eval_dir="padding/evals",
+        ),
+        checkpoint=CheckPointConfig(
+            save_freq=5_000,
+            max_checkpoints=5,
+            checkpoint_dir="padding/cps",
+        ),
+        logging=LoggingConfig(
+            logs_dir="padding/logs",
+        ),
+        training_video=TrainingVideoConfig(
+            videos_dir="padding/videos",
+            record_training=False,
+        ),
+        eval_video=EvalVideoConfig(
+            videos_dir="padding/videos",
+            record_eval=True,
+            record_best=True,
+            video_freq=2_000,
+            video_length=300,
+        ),
+        device=DeviceConfig(device="auto"),
+    )
+
+
 CONFIG_PRESETS = {
-    "standard": get_standard_config,
+    "attention": get_attention_config,
+    "lstm": get_lstm_config,
+    "padding": get_padding_config,
 }
 
 

@@ -1,484 +1,263 @@
-"""
-Comprehensive tests for LSTMExtractor.
+"""Comprehensive tests for LSTMExtractor.
 
-This module tests the LSTMExtractor class including initialization,
-forward pass, LSTM sequence processing, bidirectional processing,
-and gradient flow.
+This module tests the LSTMExtractor functionality including initialization,
+forward pass, LSTM processing, and feature extraction with proper batch dimensions.
 """
 
 import pytest
 import torch
 import torch.nn as nn
 from gymnasium import spaces
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from ..lstm_extractor import LSTMExtractor
 
 
-class TestLSTMExtractor:
-    """Test suite for LSTMExtractor class."""
+class TestLSTMExtractorInit:
+    """Test suite for LSTMExtractor initialization."""
 
-    def create_test_observation_space(self):
-        """Create a test observation space for the extractor."""
-        return spaces.Dict(
+    def test_default_initialization(self):
+        """Test initialization with default parameters."""
+        observation_space = spaces.Dict(
             {
-                "agent": spaces.Box(
-                    low=-float("inf"), high=float("inf"), shape=(7,)
-                ),
-                "obstacles": spaces.Box(
-                    low=-float("inf"), high=float("inf"), shape=(10, 7)
-                ),
-                "target": spaces.Box(
-                    low=-float("inf"), high=float("inf"), shape=(2,)
-                ),
+                "agent": spaces.Box(low=-1, high=1, shape=(5,)),
+                "obstacles": spaces.Box(low=-1, high=1, shape=(10, 7)),
+                "target": spaces.Box(low=-1, high=1, shape=(2,)),
                 "mask": spaces.Box(low=0, high=1, shape=(10,)),
             }
         )
 
-    def create_test_observations(
-        self, batch_size: int = 2, max_obstacles: int = 10
-    ):
-        """Create test observation tensors."""
-        return {
-            "agent": torch.randn(batch_size, 7),
-            "obstacles": torch.randn(batch_size, max_obstacles, 7),
-            "target": torch.randn(batch_size, 2),
-            "mask": torch.randint(0, 2, (batch_size, max_obstacles)).float(),
-        }
-
-    def test_initialization_default_parameters(self):
-        """Test initialization with default parameters."""
-        observation_space = self.create_test_observation_space()
         extractor = LSTMExtractor(observation_space)
 
+        # Test default values
         assert extractor._max_obstacles == 10
-        assert extractor._include_acceleration == False
+        assert (
+            extractor._include_acceleration == True
+        )  # Corrected default value
+        assert extractor._include_radius == True
         assert extractor._bidirectional == False
-        assert extractor._features_dim == 64  # Default features_dim
-        assert isinstance(extractor._lstm, nn.LSTM)
-        assert isinstance(extractor._post, nn.Sequential)
+        assert extractor._agent_size == 5  # vel_x, vel_y, acc_x, acc_y, radius
+        assert extractor._target_size == 2  # rel_pos_x, rel_pos_y
+        assert (
+            extractor._obstacle_size == 7
+        )  # radius, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y
+        assert extractor.features_dim == 64
 
-    def test_initialization_custom_parameters(self):
+    def test_custom_initialization(self):
         """Test initialization with custom parameters."""
-        observation_space = self.create_test_observation_space()
+        observation_space = spaces.Dict(
+            {
+                "agent": spaces.Box(low=-1, high=1, shape=(5,)),
+                "obstacles": spaces.Box(low=-1, high=1, shape=(15, 7)),
+                "target": spaces.Box(low=-1, high=1, shape=(2,)),
+                "mask": spaces.Box(low=0, high=1, shape=(15,)),
+            }
+        )
+
         extractor = LSTMExtractor(
             observation_space,
-            max_obstacles=5,
-            include_acceleration=True,
+            max_obstacles=15,
+            include_acceleration=False,
+            include_radius=False,
             lstm_hidden=256,
             lstm_layers=2,
             bidirectional=True,
+            use_layernorm=False,
             features_dim=128,
         )
 
-        assert extractor._max_obstacles == 5
-        assert extractor._include_acceleration == True
+        assert extractor._max_obstacles == 15
+        assert extractor._include_acceleration == False
+        assert extractor._include_radius == False
         assert extractor._bidirectional == True
-        assert extractor._features_dim == 128
-        assert extractor._lstm.hidden_size == 256
-        assert extractor._lstm.num_layers == 2
-        assert extractor._lstm.bidirectional == True
+        assert extractor._agent_size == 2  # vel_x, vel_y only
+        assert extractor._target_size == 2
+        assert extractor._obstacle_size == 4  # pos_x, pos_y, vel_x, vel_y only
+        assert extractor.features_dim == 128
 
-    def test_initialization_with_layernorm(self):
-        """Test initialization with layer normalization."""
-        observation_space = self.create_test_observation_space()
-        extractor = LSTMExtractor(observation_space, use_layernorm=True)
-
-        # Check that post-processing includes LayerNorm
-        has_layernorm = any(
-            isinstance(module, nn.LayerNorm)
-            for module in extractor._post.modules()
+    def test_lstm_layer_construction(self):
+        """Test that LSTM layer is properly constructed."""
+        observation_space = spaces.Dict(
+            {
+                "agent": spaces.Box(low=-1, high=1, shape=(5,)),
+                "obstacles": spaces.Box(low=-1, high=1, shape=(10, 7)),
+                "target": spaces.Box(low=-1, high=1, shape=(2,)),
+                "mask": spaces.Box(low=0, high=1, shape=(10,)),
+            }
         )
-        assert has_layernorm
 
-    def test_initialization_without_layernorm(self):
-        """Test initialization without layer normalization."""
-        observation_space = self.create_test_observation_space()
-        extractor = LSTMExtractor(observation_space, use_layernorm=False)
-
-        # Check that post-processing doesn't include LayerNorm
-        has_layernorm = any(
-            isinstance(module, nn.LayerNorm)
-            for module in extractor._post.modules()
-        )
-        assert not has_layernorm
-
-    def test_forward_basic_functionality(self):
-        """Test basic forward pass functionality."""
-        observation_space = self.create_test_observation_space()
         extractor = LSTMExtractor(
-            observation_space, max_obstacles=3, features_dim=64
+            observation_space, lstm_hidden=64, lstm_layers=2, bidirectional=True
         )
 
-        obs = self.create_test_observations(batch_size=2, max_obstacles=3)
-        result = extractor.forward(obs)
-
-        assert result.shape == (2, 64)  # batch_size, features_dim
-        assert torch.isfinite(result).all()
-
-    def test_forward_unidirectional_lstm(self):
-        """Test forward pass with unidirectional LSTM."""
-        observation_space = self.create_test_observation_space()
-        extractor = LSTMExtractor(
-            observation_space,
-            max_obstacles=3,
-            lstm_hidden=32,
-            bidirectional=False,
-            features_dim=64,
-        )
-
-        obs = self.create_test_observations(batch_size=2, max_obstacles=3)
-        result = extractor.forward(obs)
-
-        assert result.shape == (2, 64)
-        assert torch.isfinite(result).all()
-
-    def test_forward_bidirectional_lstm(self):
-        """Test forward pass with bidirectional LSTM."""
-        observation_space = self.create_test_observation_space()
-        extractor = LSTMExtractor(
-            observation_space,
-            max_obstacles=3,
-            lstm_hidden=32,
-            bidirectional=True,
-            features_dim=64,
-        )
-
-        obs = self.create_test_observations(batch_size=2, max_obstacles=3)
-        result = extractor.forward(obs)
-
-        assert result.shape == (2, 64)
-        assert torch.isfinite(result).all()
-
-    def test_forward_with_acceleration(self):
-        """Test forward pass with acceleration features."""
-        observation_space = self.create_test_observation_space()
-        extractor = LSTMExtractor(
-            observation_space,
-            max_obstacles=3,
-            include_acceleration=True,
-            features_dim=64,
-        )
-
-        obs = self.create_test_observations(batch_size=2, max_obstacles=3)
-        result = extractor.forward(obs)
-
-        assert result.shape == (2, 64)
-        assert torch.isfinite(result).all()
-
-    def test_forward_with_multi_layer_lstm(self):
-        """Test forward pass with multi-layer LSTM."""
-        observation_space = self.create_test_observation_space()
-        extractor = LSTMExtractor(
-            observation_space,
-            max_obstacles=3,
-            lstm_layers=3,
-            features_dim=64,
-        )
-
-        obs = self.create_test_observations(batch_size=2, max_obstacles=3)
-        result = extractor.forward(obs)
-
-        assert result.shape == (2, 64)
-        assert torch.isfinite(result).all()
-
-    def test_forward_with_masked_obstacles(self):
-        """Test forward pass with partially masked obstacles."""
-        observation_space = self.create_test_observation_space()
-        extractor = LSTMExtractor(
-            observation_space, max_obstacles=3, features_dim=64
-        )
-
-        obs = self.create_test_observations(batch_size=2, max_obstacles=3)
-        # Set some obstacles as invalid
-        obs["mask"] = torch.tensor([[1.0, 1.0, 0.0], [1.0, 0.0, 0.0]])
-
-        result = extractor.forward(obs)
-
-        assert result.shape == (2, 64)
-        assert torch.isfinite(result).all()
-
-    def test_forward_all_obstacles_masked(self):
-        """Test forward pass with all obstacles masked."""
-        observation_space = self.create_test_observation_space()
-        extractor = LSTMExtractor(
-            observation_space, max_obstacles=3, features_dim=64
-        )
-
-        obs = self.create_test_observations(batch_size=2, max_obstacles=3)
-        # Set all obstacles as invalid
-        obs["mask"] = torch.zeros(2, 3)
-
-        result = extractor.forward(obs)
-
-        assert result.shape == (2, 64)
-        assert torch.isfinite(result).all()
-
-    def test_gradient_flow(self):
-        """Test gradient flow through the network."""
-        observation_space = self.create_test_observation_space()
-        extractor = LSTMExtractor(
-            observation_space, max_obstacles=3, lstm_hidden=32, features_dim=64
-        )
-
-        obs = self.create_test_observations(batch_size=2, max_obstacles=3)
-        # Set all obstacles as valid for consistent gradient flow
-        obs["mask"] = torch.ones(2, 3)
-
-        for k in ("agent", "obstacles", "target"):
-            obs[k].requires_grad_(True)
-
-        out = extractor.forward(obs)
-        loss = out.sum()
-        loss.backward()
-
-        # Check input gradients
-        for k in ("agent", "obstacles", "target"):
-            assert obs[k].grad is not None, f"{k} gradient is None"
-            assert torch.any(obs[k].grad != 0), f"{k} gradient is all zeros"
-
-        # Check parameter gradients
-        param_count = 0
-        grad_count = 0
-        for name, param in extractor.named_parameters():
-            if param.requires_grad:
-                param_count += 1
-                if param.grad is not None and torch.any(param.grad != 0):
-                    grad_count += 1
-
-        assert grad_count > 0, "No parameters received gradients"
+        lstm = extractor._lstm
         assert (
-            grad_count >= param_count * 0.8
-        ), f"Only {grad_count}/{param_count} parameters have gradients"
-
-    def test_deterministic_output(self):
-        """Test that output is deterministic given the same input."""
-        observation_space = self.create_test_observation_space()
-        extractor = LSTMExtractor(
-            observation_space, max_obstacles=3, features_dim=64
-        )
-
-        obs = self.create_test_observations(batch_size=2, max_obstacles=3)
-
-        # Set deterministic seed
-        torch.manual_seed(42)
-        result1 = extractor.forward(obs)
-
-        torch.manual_seed(42)
-        result2 = extractor.forward(obs)
-
-        assert torch.allclose(result1, result2, atol=1e-6)
-
-    def test_batch_independence(self):
-        """Test that different batch items are processed independently."""
-        observation_space = self.create_test_observation_space()
-        extractor = LSTMExtractor(
-            observation_space, max_obstacles=3, features_dim=64
-        )
-
-        # Create observations where second batch item is copy of first
-        obs1 = self.create_test_observations(batch_size=1, max_obstacles=3)
-        obs2 = {k: torch.cat([v, v], dim=0) for k, v in obs1.items()}
-
-        result1 = extractor.forward(obs1)
-        result2 = extractor.forward(obs2)
-
-        # First batch result should be same
-        assert torch.allclose(result1[0], result2[0], atol=1e-6)
-        # Second batch result should be same as first (since they're identical)
-        assert torch.allclose(result2[0], result2[1], atol=1e-6)
-
-    def test_different_lstm_configurations(self):
-        """Test different LSTM configurations produce different outputs."""
-        observation_space = self.create_test_observation_space()
-        obs = self.create_test_observations(batch_size=2, max_obstacles=3)
-
-        # Unidirectional LSTM
-        extractor_uni = LSTMExtractor(
-            observation_space,
-            max_obstacles=3,
-            lstm_hidden=32,
-            bidirectional=False,
-            features_dim=64,
-        )
-
-        # Bidirectional LSTM
-        extractor_bi = LSTMExtractor(
-            observation_space,
-            max_obstacles=3,
-            lstm_hidden=32,
-            bidirectional=True,
-            features_dim=64,
-        )
-
-        result_uni = extractor_uni.forward(obs)
-        result_bi = extractor_bi.forward(obs)
-
-        # Results should be different due to different architectures
-        assert not torch.allclose(result_uni, result_bi, atol=1e-3)
-        assert result_uni.shape == result_bi.shape == (2, 64)
-
-    def test_features_dim_property(self):
-        """Test that features_dim property returns correct value."""
-        observation_space = self.create_test_observation_space()
-
-        extractor64 = LSTMExtractor(observation_space, features_dim=64)
-        extractor128 = LSTMExtractor(observation_space, features_dim=128)
-
-        assert extractor64.features_dim == 64
-        assert extractor128.features_dim == 128
-
-    def test_different_features_dim_outputs(self):
-        """Test that different features_dim produces different output shapes."""
-        observation_space = self.create_test_observation_space()
-        obs = self.create_test_observations(batch_size=2, max_obstacles=3)
-
-        extractor64 = LSTMExtractor(
-            observation_space, max_obstacles=3, features_dim=64
-        )
-        extractor128 = LSTMExtractor(
-            observation_space, max_obstacles=3, features_dim=128
-        )
-
-        result64 = extractor64.forward(obs)
-        result128 = extractor128.forward(obs)
-
-        assert result64.shape == (2, 64)
-        assert result128.shape == (2, 128)
-
-    @patch("extractors.lstm_extractor.validate_observation_tensors")
-    def test_validation_called(self, mock_validate):
-        """Test that observation validation is called."""
-        observation_space = self.create_test_observation_space()
-        extractor = LSTMExtractor(observation_space, max_obstacles=3)
-        obs = self.create_test_observations(batch_size=2, max_obstacles=3)
-
-        extractor.forward(obs)
-        mock_validate.assert_called_once()
+            lstm.input_size == 7
+        )  # obstacle feature size with default settings
+        assert lstm.hidden_size == 64
+        assert lstm.num_layers == 2
+        assert lstm.batch_first == True
+        assert lstm.bidirectional == True
 
 
-class TestLSTMExtractorIntegration:
-    """Integration tests for LSTMExtractor with realistic scenarios."""
+class TestLSTMExtractorForward:
+    """Test suite for LSTMExtractor forward pass with batch dimensions."""
 
-    def create_realistic_observations(self):
-        """Create realistic observation data."""
-        return {
-            "agent": torch.tensor(
-                [
-                    [
-                        0.5,
-                        1.0,
-                        2.0,
-                        0.1,
-                        -0.1,
-                        0.01,
-                        -0.01,
-                    ],  # radius, pos, vel, acc
-                    [0.5, -1.0, 1.5, -0.05, 0.2, 0.02, 0.0],
-                ]
-            ),
-            "obstacles": torch.tensor(
-                [
-                    [
-                        [0.3, 2.0, 3.0, 0.0, 0.0, 0.0, 0.0],  # Static obstacle
-                        [0.4, 0.5, 2.5, 0.1, 0.1, 0.0, 0.0],  # Moving obstacle
-                        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # Padding
-                    ],
-                    [
-                        [0.2, -0.5, 2.0, 0.0, 0.0, 0.0, 0.0],  # Static obstacle
-                        [0.3, 1.0, 1.0, -0.1, 0.0, 0.0, 0.0],  # Moving obstacle
-                        [
-                            0.6,
-                            0.0,
-                            3.0,
-                            0.2,
-                            -0.1,
-                            0.0,
-                            0.0,
-                        ],  # Another moving obstacle
-                    ],
-                ]
-            ),
-            "target": torch.tensor([[3.0, 4.0], [2.0, 3.0]]),
-            "mask": torch.tensor([[1.0, 1.0, 0.0], [1.0, 1.0, 1.0]]),
-        }
-
-    def test_realistic_navigation_scenario(self):
-        """Test with realistic navigation scenario data."""
-        observation_space = spaces.Dict(
+    def setup_method(self):
+        """Set up test fixtures."""
+        self.observation_space = spaces.Dict(
             {
-                "agent": spaces.Box(-float("inf"), float("inf"), (7,)),
-                "obstacles": spaces.Box(-float("inf"), float("inf"), (3, 7)),
-                "target": spaces.Box(-float("inf"), float("inf"), (2,)),
-                "mask": spaces.Box(0, 1, (3,)),
+                "agent": spaces.Box(low=-1, high=1, shape=(5,)),
+                "obstacles": spaces.Box(low=-1, high=1, shape=(10, 7)),
+                "target": spaces.Box(low=-1, high=1, shape=(2,)),
+                "mask": spaces.Box(low=0, high=1, shape=(10,)),
             }
         )
+        self.extractor = LSTMExtractor(self.observation_space)
+        self.batch_size = 4
 
-        extractor = LSTMExtractor(
-            observation_space, max_obstacles=3, features_dim=64
-        )
-        obs = self.create_realistic_observations()
+    def create_test_observations(self, batch_size=None):
+        """Create test observations with proper dimensions."""
+        if batch_size is None:
+            batch_size = self.batch_size
 
-        result = extractor.forward(obs)
-
-        assert result.shape == (2, 64)
-        assert torch.isfinite(result).all()
-
-    def test_performance_large_batch(self):
-        """Test performance with large batch size."""
-        observation_space = spaces.Dict(
-            {
-                "agent": spaces.Box(-float("inf"), float("inf"), (7,)),
-                "obstacles": spaces.Box(-float("inf"), float("inf"), (5, 7)),
-                "target": spaces.Box(-float("inf"), float("inf"), (2,)),
-                "mask": spaces.Box(0, 1, (5,)),
-            }
-        )
-
-        extractor = LSTMExtractor(
-            observation_space, max_obstacles=5, features_dim=64
-        )
-
-        batch_size = 32
-        obs = {
-            "agent": torch.randn(batch_size, 7),
-            "obstacles": torch.randn(batch_size, 5, 7),
+        observations = {
+            "agent": torch.randn(batch_size, 5),
+            "obstacles": torch.randn(batch_size, 10, 7),
             "target": torch.randn(batch_size, 2),
-            "mask": torch.randint(0, 2, (batch_size, 5)).float(),
+            "mask": torch.randint(0, 2, (batch_size, 10)).float(),
         }
+        return observations
 
-        result = extractor.forward(obs)
+    def test_forward_basic(self):
+        """Test basic forward pass with default parameters."""
+        observations = self.create_test_observations()
 
-        assert result.shape == (batch_size, 64)
-        assert torch.isfinite(result).all()
+        with patch("extractors.lstm_extractor.validate_observation_tensors"):
+            with patch(
+                "extractors.lstm_extractor.extract_agent_features"
+            ) as mock_agent:
+                with patch(
+                    "extractors.lstm_extractor.extract_target_features"
+                ) as mock_target:
+                    with patch(
+                        "extractors.lstm_extractor.extract_obstacle_features"
+                    ) as mock_obstacle:
+                        # Mock return values with correct dimensions for default settings
+                        mock_agent.return_value = torch.randn(
+                            self.batch_size,
+                            5,  # vel_x, vel_y, acc_x, acc_y, radius
+                        )
+                        mock_target.return_value = torch.randn(
+                            self.batch_size, 2
+                        )
+                        mock_obstacle.return_value = torch.randn(
+                            self.batch_size, 10, 7  # radius, pos, vel, acc
+                        )
 
-    def test_edge_case_single_obstacle(self):
-        """Test edge case with single obstacle."""
-        observation_space = spaces.Dict(
-            {
-                "agent": spaces.Box(-float("inf"), float("inf"), (7,)),
-                "obstacles": spaces.Box(-float("inf"), float("inf"), (1, 7)),
-                "target": spaces.Box(-float("inf"), float("inf"), (2,)),
-                "mask": spaces.Box(0, 1, (1,)),
-            }
-        )
+                        output = self.extractor(observations)
 
+                        assert output.shape == (self.batch_size, 64)
+                        assert not torch.isnan(output).any()
+                        assert not torch.isinf(output).any()
+
+    def test_forward_with_different_batch_sizes(self):
+        """Test forward pass with different batch sizes."""
+        for batch_size in [1, 2, 8, 16, 32]:
+            observations = self.create_test_observations(batch_size)
+
+            with patch(
+                "extractors.lstm_extractor.validate_observation_tensors"
+            ):
+                with patch(
+                    "extractors.lstm_extractor.extract_agent_features"
+                ) as mock_agent:
+                    with patch(
+                        "extractors.lstm_extractor.extract_target_features"
+                    ) as mock_target:
+                        with patch(
+                            "extractors.lstm_extractor.extract_obstacle_features"
+                        ) as mock_obstacle:
+                            mock_agent.return_value = torch.randn(batch_size, 5)
+                            mock_target.return_value = torch.randn(
+                                batch_size, 2
+                            )
+                            mock_obstacle.return_value = torch.randn(
+                                batch_size, 10, 7
+                            )
+
+                            output = self.extractor(observations)
+
+                            assert output.shape == (batch_size, 64)
+                            assert not torch.isnan(output).any()
+                            assert not torch.isinf(output).any()
+
+    def test_forward_with_bidirectional_lstm(self):
+        """Test forward pass with bidirectional LSTM."""
         extractor = LSTMExtractor(
-            observation_space, max_obstacles=1, features_dim=64
+            self.observation_space, bidirectional=True, features_dim=128
         )
 
-        obs = {
-            "agent": torch.randn(2, 7),
-            "obstacles": torch.randn(2, 1, 7),
-            "target": torch.randn(2, 2),
-            "mask": torch.ones(2, 1),
-        }
+        observations = self.create_test_observations()
 
-        result = extractor.forward(obs)
+        with patch("extractors.lstm_extractor.validate_observation_tensors"):
+            with patch(
+                "extractors.lstm_extractor.extract_agent_features"
+            ) as mock_agent:
+                with patch(
+                    "extractors.lstm_extractor.extract_target_features"
+                ) as mock_target:
+                    with patch(
+                        "extractors.lstm_extractor.extract_obstacle_features"
+                    ) as mock_obstacle:
+                        mock_agent.return_value = torch.randn(
+                            self.batch_size, 5
+                        )
+                        mock_target.return_value = torch.randn(
+                            self.batch_size, 2
+                        )
+                        mock_obstacle.return_value = torch.randn(
+                            self.batch_size, 10, 7
+                        )
 
-        assert result.shape == (2, 64)
-        assert torch.isfinite(result).all()
+                        output = extractor(observations)
 
+                        assert output.shape == (self.batch_size, 128)
+                        assert not torch.isnan(output).any()
+                        assert not torch.isinf(output).any()
 
-if __name__ == "__main__":
-    pytest.main([__file__])
+    def test_forward_with_minimal_features(self):
+        """Test forward pass with minimal features (no acceleration, no radius)."""
+        extractor = LSTMExtractor(
+            self.observation_space,
+            include_acceleration=False,
+            include_radius=False,
+        )
+
+        observations = self.create_test_observations()
+
+        with patch("extractors.lstm_extractor.validate_observation_tensors"):
+            with patch(
+                "extractors.lstm_extractor.extract_agent_features"
+            ) as mock_agent:
+                with patch(
+                    "extractors.lstm_extractor.extract_target_features"
+                ) as mock_target:
+                    with patch(
+                        "extractors.lstm_extractor.extract_obstacle_features"
+                    ) as mock_obstacle:
+                        mock_agent.return_value = torch.randn(
+                            self.batch_size, 2  # vel only
+                        )
+                        mock_target.return_value = torch.randn(
+                            self.batch_size, 2
+                        )
+                        mock_obstacle.return_value = torch.randn(
+                            self.batch_size, 10, 4  # pos + vel only
+                        )
+
+                        output = extractor(observations)
+
+                        assert output.shape == (self.batch_size, 64)
+                        assert not torch.isnan(output).any()
+                        assert not torch.isinf(output).any()

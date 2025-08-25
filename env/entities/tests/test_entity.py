@@ -13,7 +13,7 @@ class TestEntity:
         """Test entity initialization with default values"""
         entity = Entity()
 
-        assert entity.radius == 1.0
+        assert entity.radius == 0.5
         assert entity.mass == 1.0
         assert entity.color == (100, 100, 100)
         assert entity.collision_type == CollisionType.ENTITY

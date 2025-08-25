@@ -11,6 +11,8 @@ from env.kf_env import KFEnv
 from env.entities.agent import Agent
 from env.entities.stable_obstacle import StableObstacle
 from extractors.attention_extractor import AttentionExtractor
+from extractors.lstm_extractor import LSTMExtractor
+from extractors.padding_extractor import PaddingExtractor
 from scripts.configs import (
     get_config,
     list_available_presets,
@@ -21,14 +23,48 @@ from scripts.configs import (
 # =============================================================================
 
 # Choose your configuration preset here:
-CONFIG_PRESET = "standard"  # Change this to use different configurations
+CONFIG_PRESET = "attention"  # Change this to use different configurations
 
 config = get_config(CONFIG_PRESET)
 
 
+def get_extractor_config(feature_extractor_config, environment_config):
+    """Get the appropriate feature extractor class and kwargs based on configuration."""
+
+    # Common kwargs for all extractors
+    common_kwargs = {
+        "max_obstacles": environment_config.max_obstacles,
+        "include_acceleration": feature_extractor_config.include_acceleration,
+        "include_radius": feature_extractor_config.include_radius,
+    }
+
+    if feature_extractor_config.extractor_type == "attention":
+        return AttentionExtractor, {
+            **common_kwargs,
+            "d_model": feature_extractor_config.d_model,
+            "n_heads": feature_extractor_config.n_heads,
+            "n_layers": feature_extractor_config.n_layers,
+            "dropout": feature_extractor_config.dropout,
+        }
+    elif feature_extractor_config.extractor_type == "lstm":
+        return LSTMExtractor, {
+            **common_kwargs,
+            "lstm_hidden": feature_extractor_config.lstm_hidden,
+            "lstm_layers": feature_extractor_config.lstm_layers,
+            "bidirectional": feature_extractor_config.bidirectional,
+            "use_layernorm": feature_extractor_config.use_layernorm,
+            "features_dim": feature_extractor_config.features_dim,
+        }
+    elif feature_extractor_config.extractor_type == "padding":
+        return PaddingExtractor, common_kwargs
+    else:
+        raise ValueError(
+            f"Unknown extractor type: {feature_extractor_config.extractor_type}"
+        )
+
+
 def make_env(is_eval=False):
     def _init():
-        # Determine render mode based on video recording settings
         if is_eval and config.eval_video.record_video:
             render_mode = "rgb_array"
         elif not is_eval and config.training_video.record_video:
@@ -41,6 +77,8 @@ def make_env(is_eval=False):
             target_radius=config.environment.target_radius,
             recognition_radius=config.environment.recognition_radius,
             destruction_radius=config.environment.destruction_radius,
+            max_velocity=config.environment.max_velocity,
+            max_acceleration=config.environment.max_acceleration,
             render_mode=render_mode,
         )
 
@@ -107,19 +145,16 @@ def main():
         print("Training video recording enabled")
 
     print("Creating policy configuration...")
+    extractor_class, extractor_kwargs = get_extractor_config(
+        config.feature_extractor, config.environment
+    )
+
     policy_kwargs = {
         "net_arch": config.network.net_arch,
         "activation_fn": config.network.activation_fn,
         "log_std_init": config.sac.log_std_init,
-        "features_extractor_class": AttentionExtractor,
-        "features_extractor_kwargs": {
-            "max_obstacles": config.environment.max_obstacles,
-            "d_model": config.feature_extractor.d_model,
-            "n_heads": config.feature_extractor.n_heads,
-            "n_layers": config.feature_extractor.n_layers,
-            "dropout": config.feature_extractor.dropout,
-            "include_acceleration": config.feature_extractor.include_acceleration,
-        },
+        "features_extractor_class": extractor_class,
+        "features_extractor_kwargs": extractor_kwargs,
     }
 
     print("Creating SAC model...")
