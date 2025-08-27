@@ -10,7 +10,7 @@ class CollisionType(IntEnum):
 
 class RewardType(float, Enum):
     # Distance-based reward parameters
-    TARGET_REWARD_SCALE = 30.0  # Scale for target proximity reward
+    TARGET_REWARD_SCALE = 60.0  # Scale for target proximity reward
     OBSTACLE_PENALTY_SCALE = 50.0  # Scale for obstacle avoidance penalty
     SAFETY_RADIUS = 3.5  # Minimum safe distance from obstacles
     TARGET_BONUS = 100.0  # Bonus for reaching target
