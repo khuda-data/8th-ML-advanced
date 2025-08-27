@@ -446,17 +446,6 @@ class KFEnv(gym.Env):
         velovity_alpha = self.agent.get_velocity().length() / self.agent.max_velocity
 
         target_reward = velovity_alpha * action_target_cosine_similarity * sigmoid_target_dist * RewardType.TARGET_REWARD_SCALE 
-
-        time_penalty = self.elapsed_steps/500
-        time_target_penalty_alpha = 1 - time_penalty
-
-        target_reward *= time_target_penalty_alpha
-
-        if math.sqrt(action[0]**2 + action[1]**2) < 0.3:
-            target_reward *= RewardType.STOP_PENALTY
-            time_penalty *= RewardType.STOP_PENALTY
-        else:
-            time_penalty += RewardType.TIME_PENALTY
             # target_reward -= RewardType.STOP_PENALTY
 
         # print("time_penalty", time_penalty)
@@ -506,14 +495,24 @@ class KFEnv(gym.Env):
 
         # print("target_reward", )
 
+        time_penalty = self.elapsed_steps/500
+        time_target_penalty_alpha = 1 - time_penalty
+
         total_reward = (
             target_reward
             - obstacle_penalty
             + target_bonus
             - collision_penalty
             - boundary_penalty
-            - time_penalty
-        )
+        ) * time_target_penalty_alpha
+
+        if math.sqrt(action[0]**2 + action[1]**2) < 0.3:
+            total_reward *= RewardType.STOP_PENALTY
+            time_penalty *= RewardType.STOP_PENALTY
+        else:
+            time_penalty *= RewardType.TIME_PENALTY
+
+        total_reward -= time_penalty
 
         return total_reward
     
