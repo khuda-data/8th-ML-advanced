@@ -16,5 +16,5 @@ class RewardType(float, Enum):
     TARGET_BONUS = 100.0  # Bonus for reaching target
     COLLISION_PENALTY = 100.0  # Penalty for collision
     BOUNDARY_PENALTY = 100.0  # Penalty for going out of bounds
-    TIME_PENALTY = 1e-2
-    STOP_PENALTY = 1e-2
+    TIME_PENALTY = 0.1
+    STOP_PENALTY = 0.3

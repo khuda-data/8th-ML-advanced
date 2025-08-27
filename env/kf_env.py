@@ -222,7 +222,7 @@ class KFEnv(gym.Env):
         terminated = self.collision_occurred or self._check_target_reached()
         truncated = (
             self._is_out_destruction_(self.target_position)
-            or self.elapsed_steps > 5000
+            or self.elapsed_steps > 500
         )
 
         self.pre_distance_to_target = self._get_distance_to_target()
@@ -447,9 +447,16 @@ class KFEnv(gym.Env):
 
         target_reward = velovity_alpha * action_target_cosine_similarity * sigmoid_target_dist * RewardType.TARGET_REWARD_SCALE 
 
+        time_penalty = self.elapsed_steps/500
+
         if math.sqrt(action[0]**2 + action[1]**2) < 0.3:
-            target_reward = -RewardType.STOP_PENALTY * math.log(self._get_time_penalty() + 1)
+            target_reward *= RewardType.STOP_PENALTY
+            time_penalty *= RewardType.STOP_PENALTY
+        else:
+            time_penalty += RewardType.TIME_PENALTY
             # target_reward -= RewardType.STOP_PENALTY
+
+        # print("time_penalty", time_penalty)
 
         obstacle_penalty = 0.0
         obstacles_danger = 0.0
@@ -494,12 +501,15 @@ class KFEnv(gym.Env):
 
         # print("obstacle_penalty", obstacle_penalty)
 
+        # print("target_reward", )
+
         total_reward = (
             target_reward
             - obstacle_penalty
             + target_bonus
             - collision_penalty
             - boundary_penalty
+            - time_penalty
         )
 
         return total_reward
@@ -522,9 +532,6 @@ class KFEnv(gym.Env):
         cosine_similarity = normalized_velocity_vector.dot(normalized_direction_to_entitiy)
     
         return np.clip(cosine_similarity, -1.0, 1.0)
-    
-    def _get_time_penalty(self) -> bool:
-        return RewardType.TIME_PENALTY * self.elapsed_steps
 
     def _check_target_reached(self) -> bool:
         if not self.agent:
