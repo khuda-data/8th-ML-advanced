@@ -218,7 +218,7 @@ class KFEnv(gym.Env):
         self._manage_obstacles()
 
         observation = self._get_obs_dict()
-        reward = self._calculate_reward()
+        reward = self._calculate_reward(action)
         terminated = self.collision_occurred or self._check_target_reached()
         truncated = (
             self._is_out_destruction_(self.target_position)
@@ -431,7 +431,7 @@ class KFEnv(gym.Env):
             dtype=np.float32,
         )
 
-    def _calculate_reward(self) -> float:
+    def _calculate_reward(self, action: np.ndarray) -> float:
         if not self.agent:
             return 0.0
 
@@ -440,12 +440,19 @@ class KFEnv(gym.Env):
         target_distance = agent_pos.distance_to(self.target_position)
         max_distance = self.destruction_radius
 
-        normalized_target_dist = min(target_distance / max_distance, 1.0)
-        target_reward = (
-            1.0 - normalized_target_dist**2
-        ) * RewardType.TARGET_REWARD_SCALE
+        normalized_target_dist = max(1e-3, min(target_distance / max_distance, 1.0))
+        sigmoid_target_dist = 1/(1+math.exp(normalized_target_dist-1))
+        action_target_cosine_similarity = self._calculate_direction_cosine_similarity(self.target_position, self.agent.get_velocity())
+        velovity_alpha = self.agent.get_velocity().length() / self.agent.max_velocity
+
+        target_reward = velovity_alpha * action_target_cosine_similarity * sigmoid_target_dist * RewardType.TARGET_REWARD_SCALE 
+
+        if math.sqrt(action[0]**2 + action[1]**2) < 0.3:
+            target_reward = -RewardType.STOP_PENALTY * math.log(self._get_time_penalty() + 1)
+            # target_reward -= RewardType.STOP_PENALTY
 
         obstacle_penalty = 0.0
+        obstacles_danger = 0.0
 
         for obstacle in self.obstacles:
             obstacle_pos = obstacle.get_position()
@@ -453,12 +460,25 @@ class KFEnv(gym.Env):
 
             if obstacle_distance <= self.recognition_radius:
                 if obstacle_distance < RewardType.SAFETY_RADIUS:
-                    penalty_ratio = (
-                        RewardType.SAFETY_RADIUS - obstacle_distance
-                    ) / RewardType.SAFETY_RADIUS
-                    obstacle_penalty += (
-                        penalty_ratio**2
-                    ) * RewardType.OBSTACLE_PENALTY_SCALE
+                    obstacles_danger += 1
+                    action_obstacle_cosine_similarity = min(
+                        -self._calculate_direction_cosine_similarity(
+                                obstacle_pos, 
+                                self.agent.get_velocity()
+                            ), 
+                    -1e-3)
+                    normalized_obstacle_dist = max(1e-3, (RewardType.SAFETY_RADIUS - obstacle_distance) / RewardType.SAFETY_RADIUS)
+
+                    penalty = -1 * normalized_obstacle_dist * action_obstacle_cosine_similarity * RewardType.OBSTACLE_PENALTY_SCALE
+                    # print("p", penalty) 
+                    # print("normalized_obstacle_dist",  math.log(normalized_obstacle_dist))
+
+                    obstacle_penalty += 1e-2 if penalty < 0 else penalty
+
+        # print("obstacle_penalty", obstacle_penalty)
+
+        if obstacles_danger > 0:
+            obstacle_penalty = obstacle_penalty / obstacles_danger
 
         target_bonus = 0.0
         if self._check_target_reached():
@@ -472,6 +492,8 @@ class KFEnv(gym.Env):
         if self._is_out_destruction_(self.target_position):
             boundary_penalty = RewardType.BOUNDARY_PENALTY
 
+        # print("obstacle_penalty", obstacle_penalty)
+
         total_reward = (
             target_reward
             - obstacle_penalty
@@ -481,6 +503,28 @@ class KFEnv(gym.Env):
         )
 
         return total_reward
+    
+    def _calculate_direction_cosine_similarity(
+        self, entitiy_vectoer: Vector2, velocity: Vector2
+    ) -> float:
+        vector_to_entity = entitiy_vectoer - self.agent.get_position()
+        
+        if velocity.length_squared() < 1e-9 or vector_to_entity.length_squared() < 1e-9:
+            # velocity가 없고 타겟에 도달한 경우 -> 1.0 (최대 유사도)
+            if vector_to_entity.length_squared() < 1e-9:
+                return 1.0
+            # 그 외 방향성 없는 경우는 0.0
+            return 0.0
+
+        normalized_velocity_vector = velocity.normalize()
+        normalized_direction_to_entitiy = vector_to_entity.normalize()
+
+        cosine_similarity = normalized_velocity_vector.dot(normalized_direction_to_entitiy)
+    
+        return np.clip(cosine_similarity, -1.0, 1.0)
+    
+    def _get_time_penalty(self) -> bool:
+        return RewardType.TIME_PENALTY * self.elapsed_steps
 
     def _check_target_reached(self) -> bool:
         if not self.agent:
