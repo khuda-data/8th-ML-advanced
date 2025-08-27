@@ -466,7 +466,7 @@ class KFEnv(gym.Env):
                                 obstacle_pos, 
                                 self.agent.get_velocity()
                             ), 
-                    -1e-3)
+                    -1e-2)
                     normalized_obstacle_dist = max(1e-3, (RewardType.SAFETY_RADIUS - obstacle_distance) / RewardType.SAFETY_RADIUS)
 
                     penalty = -1 * normalized_obstacle_dist * action_obstacle_cosine_similarity * RewardType.OBSTACLE_PENALTY_SCALE
